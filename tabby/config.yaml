@@ -236,4 +236,5 @@ profileDefaults:
     type: local
     options:
       env: {}
+      cwd: C:\Users\bairo\dev
     behaviorOnSessionEnd: keep

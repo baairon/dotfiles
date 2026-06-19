@@ -109,18 +109,6 @@ local function cleanup()
   pcall(vim.cmd, 'Neotree close')
 end
 
-local function focus_term(kind)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local b = vim.api.nvim_win_get_buf(win)
-    local ok, val = pcall(vim.api.nvim_buf_get_var, b, 'workspace_term')
-    if ok and val == kind then
-      pcall(vim.api.nvim_set_current_win, win)
-      return true
-    end
-  end
-  return false
-end
-
 function M.editor_winid()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local ok, v = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
@@ -135,6 +123,7 @@ function M.open_workspace()
   vim.cmd('only')
 
   spawn_term(git_bash(), 'top')
+  local top_win = vim.api.nvim_get_current_win()
 
   vim.cmd('belowright split')
   spawn_term(git_bash(), 'shell')
@@ -142,11 +131,18 @@ function M.open_workspace()
 
   pcall(vim.cmd, 'Neotree show filesystem left')
 
+  local function focus_top()
+    if vim.api.nvim_win_is_valid(top_win) then
+      vim.api.nvim_set_current_win(top_win)
+      vim.cmd('startinsert')
+    end
+  end
   vim.schedule(function()
     rebuilding = false
     vim.cmd('redraw!')
-    if focus_term('top') then vim.cmd('startinsert') else vim.cmd('stopinsert') end
+    focus_top()
   end)
+  vim.defer_fn(focus_top, 50)
 end
 
 function M.lazygit_float()

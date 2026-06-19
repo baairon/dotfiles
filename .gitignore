@@ -1,0 +1,8 @@
+# Tabby: only the portable profile is tracked
+tabby/*
+!tabby/config.yaml
+
+# Local editor/terminal state and backups
+*.bak
+*.backup
+*.bak-*

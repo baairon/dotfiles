@@ -26,11 +26,12 @@ o.wrap = false
 o.scrolloff = 6
 o.updatetime = 250
 o.timeoutlen = 400
-o.ttimeoutlen = 10
+o.ttimeoutlen = 50
 o.showmode = false
+o.shortmess:append('I')
 
 o.laststatus = 3
-function _G.CockpitGitBranch()
+function _G.WorkspaceGitBranch()
   local head = vim.b.gitsigns_head
   if head and head ~= '' then return ' (' .. head .. ') ' end
   return ' '
@@ -38,7 +39,7 @@ end
 o.statusline = table.concat({
   ' %f',
   ' %m%r',
-  '%{%v:lua.CockpitGitBranch()%}',
+  '%{%v:lua.WorkspaceGitBranch()%}',
   '%=',
   '%y',
   ' %l:%c ',
@@ -54,6 +55,3 @@ if vim.fn.has('win32') == 1 and vim.fn.executable('cmd.exe') == 1 then
   o.shellpipe = '>%s 2>&1'
   o.shelltemp = true
 end
-
-vim.g.loaded_netrw = 1
-vim.g.loaded_netrwPlugin = 1

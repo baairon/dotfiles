@@ -26,7 +26,7 @@ local function panel_bufs(panel)
   local out = {}
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(b) then
-      local ok, p = pcall(function() return vim.b[b].cockpit_panel end)
+      local ok, p = pcall(function() return vim.b[b].workspace_panel end)
       if ok and p == panel then out[#out + 1] = b end
     end
   end
@@ -34,47 +34,50 @@ local function panel_bufs(panel)
   return out
 end
 
-function _G.CockpitWinbar()
+local function term_name(b)
+  local ok, cmd = pcall(function() return vim.b[b].workspace_cmd end)
+  return (ok and cmd) and vim.fn.fnamemodify(cmd, ':t:r') or 'term'
+end
+
+function _G.WorkspaceWinbar()
   local win = vim.g.statusline_winid
   local buf = (win and win ~= 0 and vim.api.nvim_win_is_valid(win))
     and vim.api.nvim_win_get_buf(win) or vim.api.nvim_get_current_buf()
-  local ok, panel = pcall(function() return vim.b[buf].cockpit_panel end)
+  local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
   if not ok or not panel then return '' end
-  local names = { top = 'bash', shell = 'bash' }
   local parts = {}
   local bufs = panel_bufs(panel)
   local termtotal, seen = {}, {}
   for _, b in ipairs(bufs) do
     if vim.bo[b].buftype == 'terminal' then
-      local k = vim.b[b].cockpit_term or panel
-      termtotal[k] = (termtotal[k] or 0) + 1
+      local nm = term_name(b)
+      termtotal[nm] = (termtotal[nm] or 0) + 1
     end
   end
   for _, b in ipairs(bufs) do
     local label
     if vim.bo[b].buftype == 'terminal' then
-      local k = vim.b[b].cockpit_term or panel
-      seen[k] = (seen[k] or 0) + 1
-      local nm = names[k] or k
-      label = (termtotal[k] > 1) and (nm .. ' ' .. seen[k]) or nm
+      local nm = term_name(b)
+      seen[nm] = (seen[nm] or 0) + 1
+      label = (termtotal[nm] > 1) and (nm .. ' ' .. seen[nm]) or nm
     else
       local n = vim.api.nvim_buf_get_name(b)
       label = (n ~= '' and vim.fn.fnamemodify(n, ':t')) or '[new]'
     end
     local hl = (b == buf) and '%#TabLineSel#' or '%#TabLine#'
-    parts[#parts + 1] = '%' .. b .. '@v:lua.CockpitTabClick@' .. hl .. ' ' .. label .. ' %X'
+    parts[#parts + 1] = '%' .. b .. '@v:lua.WorkspaceTabClick@' .. hl .. ' ' .. label .. ' %X'
   end
   parts[#parts + 1] = '%#TabLineFill#'
   return table.concat(parts)
 end
 
-function _G.CockpitTabClick(bufnr)
+function _G.WorkspaceTabClick(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
-  local ok, panel = pcall(function() return vim.b[bufnr].cockpit_panel end)
+  local ok, panel = pcall(function() return vim.b[bufnr].workspace_panel end)
   if not ok or not panel then return end
   for _, w in ipairs(vim.api.nvim_list_wins()) do
     local wb = vim.api.nvim_win_get_buf(w)
-    local okp, p = pcall(function() return vim.b[wb].cockpit_panel end)
+    local okp, p = pcall(function() return vim.b[wb].workspace_panel end)
     if okp and p == panel then
       vim.api.nvim_win_set_buf(w, bufnr)
       vim.api.nvim_set_current_win(w)
@@ -83,21 +86,22 @@ function _G.CockpitTabClick(bufnr)
   end
 end
 
-local WINBAR = '%{%v:lua.CockpitWinbar()%}'
+local WINBAR = '%{%v:lua.WorkspaceWinbar()%}'
 
 local function spawn_term(cmd, kind)
   vim.cmd('enew')
   vim.fn.jobstart(cmd, { term = true, env = { PROMPT_COMMAND = OSC7_PROMPT } })
-  vim.b.cockpit_term = kind
-  vim.b.cockpit_panel = kind
-  vim.api.nvim_win_set_var(0, 'cockpit_winpanel', kind)
+  vim.b.workspace_term = kind
+  vim.b.workspace_panel = kind
+  vim.b.workspace_cmd = type(cmd) == 'table' and cmd[1] or cmd
+  vim.api.nvim_win_set_var(0, 'workspace_winpanel', kind)
   vim.cmd('setlocal nonumber norelativenumber signcolumn=no')
   vim.wo.winbar = WINBAR
 end
 
 local function cleanup()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    local ok, val = pcall(vim.api.nvim_buf_get_var, buf, 'cockpit_term')
+    local ok, val = pcall(vim.api.nvim_buf_get_var, buf, 'workspace_term')
     if ok and val and vim.api.nvim_buf_is_valid(buf) then
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end
@@ -108,7 +112,7 @@ end
 local function focus_term(kind)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local b = vim.api.nvim_win_get_buf(win)
-    local ok, val = pcall(vim.api.nvim_buf_get_var, b, 'cockpit_term')
+    local ok, val = pcall(vim.api.nvim_buf_get_var, b, 'workspace_term')
     if ok and val == kind then
       pcall(vim.api.nvim_set_current_win, win)
       return true
@@ -119,7 +123,7 @@ end
 
 function M.editor_winid()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local ok, v = pcall(vim.api.nvim_win_get_var, win, 'cockpit_winpanel')
+    local ok, v = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
     if ok and v == 'top' and vim.api.nvim_win_is_valid(win) then return win end
   end
   return 0
@@ -138,8 +142,11 @@ function M.open_workspace()
 
   pcall(vim.cmd, 'Neotree show filesystem left')
 
-  if focus_term('top') then vim.cmd('startinsert') else vim.cmd('stopinsert') end
-  vim.schedule(function() rebuilding = false end)
+  vim.schedule(function()
+    rebuilding = false
+    vim.cmd('redraw!')
+    if focus_term('top') then vim.cmd('startinsert') else vim.cmd('stopinsert') end
+  end)
 end
 
 function M.lazygit_float()
@@ -168,12 +175,12 @@ end
 
 local function jump(kind)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'cockpit_winpanel')
+    local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
     if ok and wp == kind then
       vim.api.nvim_set_current_win(win)
-      if vim.b[vim.api.nvim_win_get_buf(win)].cockpit_term ~= kind then
+      if vim.b[vim.api.nvim_win_get_buf(win)].workspace_term ~= kind then
         for _, b in ipairs(panel_bufs(kind)) do
-          if vim.b[b].cockpit_term == kind then
+          if vim.b[b].workspace_term == kind then
             vim.api.nvim_win_set_buf(win, b)
             break
           end
@@ -189,12 +196,12 @@ local function rotate_term()
   local wins = {}
   for _, kind in ipairs({ 'top', 'shell' }) do
     for _, win in ipairs(vim.api.nvim_list_wins()) do
-      local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'cockpit_winpanel')
+      local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
       if ok and wp == kind then wins[#wins + 1] = win end
     end
   end
   if #wins == 0 then
-    vim.notify('no cockpit terminals (run <leader>w)', vim.log.levels.INFO)
+    vim.notify('no workspace terminals (run <leader>w)', vim.log.levels.INFO)
     return
   end
   local cur, idx = vim.api.nvim_get_current_win(), 0
@@ -203,24 +210,13 @@ local function rotate_term()
 end
 
 local function add_term_to_panel()
-  local panel = vim.b.cockpit_panel
+  local panel = vim.b.workspace_panel
   if panel ~= 'top' and panel ~= 'shell' then panel = 'shell' end
   spawn_term(git_bash(), panel)
 end
 
-local function cycle_panel(dir)
-  local panel = vim.b.cockpit_panel
-  if not panel then return end
-  local bufs = panel_bufs(panel)
-  if #bufs <= 1 then return end
-  local cur, idx = vim.api.nvim_get_current_buf(), 1
-  for i, b in ipairs(bufs) do if b == cur then idx = i end end
-  local nextb = bufs[((idx - 1 + dir) % #bufs) + 1]
-  vim.api.nvim_win_set_buf(0, nextb)
-end
-
 local function close_tab()
-  local panel = vim.b.cockpit_panel
+  local panel = vim.b.workspace_panel
   if not panel then return end
   local cur = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
@@ -229,10 +225,12 @@ local function close_tab()
   for _, b in ipairs(panel_bufs(panel)) do if b ~= cur then others[#others + 1] = b end end
   closing = true
   if #others > 0 then
-    vim.api.nvim_win_set_buf(win, others[1])
-    pcall(vim.api.nvim_buf_delete, cur, { force = force })
+    vim.api.nvim_win_set_buf(win, others[#others])
+    local ok, err = pcall(vim.api.nvim_buf_delete, cur, { force = force })
+    if not ok then vim.notify(err, vim.log.levels.ERROR) end
   else
-    local ok = pcall(vim.api.nvim_buf_delete, cur, { force = force })
+    local ok, err = pcall(vim.api.nvim_buf_delete, cur, { force = force })
+    if not ok then vim.notify(err, vim.log.levels.ERROR) end
     if ok and vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
   end
   closing = false
@@ -247,21 +245,29 @@ map('n', '<leader>tr', rotate_term, { desc = 'Rotate between panels' })
 
 local function from_term(fn)
   return function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'n', false)
-    vim.schedule(fn)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'nx', false)
+    fn()
   end
 end
-local cyc_next = function() cycle_panel(1) end
-local cyc_prev = function() cycle_panel(-1) end
 map('n', '<leader>t', add_term_to_panel, { desc = 'New terminal tab (panel)' })
 map('n', '<A-t>', add_term_to_panel, { desc = 'New terminal tab (panel)' })
 map('t', '<A-t>', from_term(add_term_to_panel), { desc = 'New terminal tab (panel)' })
-map('n', '<A-n>', cyc_next, { desc = 'Next tab (panel)' })
-map('t', '<A-n>', from_term(cyc_next), { desc = 'Next tab (panel)' })
-map('n', '<A-p>', cyc_prev, { desc = 'Prev tab (panel)' })
-map('t', '<A-p>', from_term(cyc_prev), { desc = 'Prev tab (panel)' })
 map('n', '<A-w>', close_tab, { desc = 'Close tab (panel)' })
 map('t', '<A-w>', from_term(close_tab), { desc = 'Close tab (panel)' })
+
+local function jump_to_tab(n)
+  local ok, panel = pcall(vim.api.nvim_win_get_var, 0, 'workspace_winpanel')
+  if not ok or not panel then return end
+  local bufs = panel_bufs(panel)
+  if n > #bufs then return end
+  vim.api.nvim_win_set_buf(0, bufs[n])
+end
+
+for i = 1, 9 do
+  local fn = function() jump_to_tab(i) end
+  map('n', '<A-' .. i .. '>', fn, { desc = 'Tab ' .. i .. ' (panel)' })
+  map('t', '<A-' .. i .. '>', from_term(fn), { desc = 'Tab ' .. i .. ' (panel)' })
+end
 
 local function osc7_path(seq)
   local uri = seq:match('\27%]7;(file://[^\7\27]*)')
@@ -284,12 +290,20 @@ vim.api.nvim_create_autocmd('TermRequest', {
   end,
 })
 
+vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter' }, {
+  callback = function(args)
+    if vim.bo[args.buf].buftype ~= 'terminal' then
+      vim.schedule(function() vim.cmd('stopinsert') end)
+    end
+  end,
+})
+
 vim.api.nvim_create_autocmd('BufWinEnter', {
   callback = function(args)
     local buf = args.buf
     if vim.bo[buf].buftype ~= '' or vim.api.nvim_buf_get_name(buf) == '' then return end
-    if not vim.b[buf].cockpit_panel then
-      vim.b[buf].cockpit_panel = vim.w.cockpit_winpanel or 'top'
+    if not vim.b[buf].workspace_panel then
+      vim.b[buf].workspace_panel = vim.w.workspace_winpanel or 'top'
     end
     vim.wo.winbar = WINBAR
   end,
@@ -316,7 +330,7 @@ vim.api.nvim_create_autocmd('TermClose', {
   callback = function(args)
     if rebuilding or closing or quitting then return end
     local buf = args.buf
-    local ok, panel = pcall(function() return vim.b[buf].cockpit_panel end)
+    local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
     if not ok or (panel ~= 'top' and panel ~= 'shell') then return end
     vim.schedule(function()
       if quitting then return end
@@ -331,7 +345,7 @@ vim.api.nvim_create_autocmd('TermClose', {
       if win and vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_set_current_win(win)
         if #others > 0 then
-          vim.api.nvim_win_set_buf(win, others[1])
+          vim.api.nvim_win_set_buf(win, others[#others])
         else
           spawn_term(git_bash(), panel)
         end

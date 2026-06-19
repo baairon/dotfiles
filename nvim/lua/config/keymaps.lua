@@ -24,3 +24,6 @@ map('n', '<Esc>', '<cmd>nohlsearch<cr>', { desc = 'Clear highlight' })
 
 map('n', '<leader>q', '<cmd>q<cr>', { desc = 'Close window' })
 map('n', '<C-s>', '<cmd>write<cr>', { desc = 'Save file' })
+
+map('n', '<leader>v', '<cmd>RenderMarkdown toggle<cr>', { desc = 'Toggle markdown render' })
+map('n', '<A-V>', '<cmd>RenderMarkdown toggle<cr>', { desc = 'Toggle markdown render' })

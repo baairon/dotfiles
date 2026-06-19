@@ -13,7 +13,7 @@ return {
     enable_git_status = true,
     enable_diagnostics = false,
     commands = {
-      cockpit_open = function(state)
+      workspace_open = function(state)
         local node = state.tree:get_node()
         if not node then return end
         if node.type == 'directory' then
@@ -41,9 +41,9 @@ return {
     window = {
       width = 30,
       mappings = {
-        ['<cr>'] = 'cockpit_open',
-        ['o'] = 'cockpit_open',
-        ['<2-LeftMouse>'] = 'cockpit_open',
+        ['<cr>'] = 'workspace_open',
+        ['o'] = 'workspace_open',
+        ['<2-LeftMouse>'] = 'workspace_open',
       },
     },
     filesystem = {

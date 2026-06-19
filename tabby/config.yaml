@@ -176,6 +176,7 @@ hotkeys:
     - Ctrl-W
 terminal:
   profile: local:git-bash
+  frontend: xterm
   searchOptions: {}
   colorScheme:
     name: Custom
@@ -205,8 +206,8 @@ terminal:
   fontWeightBold: 600
   paletteGenerate: false
   paletteHarmonious: false
-  fontSize: 16
-  cursor: underline
+  fontSize: 15
+  cursor: block
   font: Hack Nerd Font
 ssh: {}
 clickableLinks: {}
@@ -236,5 +237,4 @@ profileDefaults:
     type: local
     options:
       env: {}
-      cwd: C:\Users\bairo\dev
     behaviorOnSessionEnd: keep

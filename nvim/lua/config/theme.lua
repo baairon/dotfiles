@@ -19,6 +19,9 @@ local function paint()
   set(0, 'NeoTreeNormal',   { bg = BG })
   set(0, 'NeoTreeNormalNC', { bg = BG })
   set(0, 'NeoTreeEndOfBuffer', { bg = BG })
+  set(0, 'Cursor',          { fg = BG, bg = '#cfd6e6' })
+  set(0, 'lCursor',         { fg = BG, bg = '#cfd6e6' })
+  set(0, 'TermCursor',      { fg = BG, bg = '#cfd6e6' })
 end
 
 paint()

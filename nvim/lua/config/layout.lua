@@ -7,13 +7,14 @@ local quitting = false
 local AUTO_BOOT = true
 
 local function git_bash()
-  local candidates = {
-    'C:\\Program Files\\Git\\bin\\bash.exe',
-    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-    vim.fn.exepath('bash'),
-  }
+  local candidates = {}
+  local function add(p) if p and p ~= '' then candidates[#candidates + 1] = p end end
+  add((vim.env.ProgramFiles or 'C:\\Program Files') .. '\\Git\\bin\\bash.exe')
+  add((vim.env['ProgramFiles(x86)'] or 'C:\\Program Files (x86)') .. '\\Git\\bin\\bash.exe')
+  if vim.env.LOCALAPPDATA then add(vim.env.LOCALAPPDATA .. '\\Programs\\Git\\bin\\bash.exe') end
+  add(vim.fn.exepath('bash'))
   for _, p in ipairs(candidates) do
-    if p ~= '' and vim.fn.executable(p) == 1 then
+    if vim.fn.executable(p) == 1 then
       return { p, '--login', '-i' }
     end
   end
@@ -233,7 +234,16 @@ local function close_tab()
 end
 
 local map = vim.keymap.set
-map('n', '<leader>w',  M.open_workspace, { desc = 'Open agentic workspace' })
+map('n', '<leader>w',  function()
+  require('config.splash').show(function(launched)
+    if launched then M.open_workspace() end
+  end, { animate = false })
+end, { desc = 'Workspace main menu' })
+map('n', '<leader>W',  function()
+  require('config.splash').show(function(launched)
+    if launched then M.open_workspace() end
+  end, { view = 'dirs', animate = false })
+end, { desc = 'Switch workspace (~/dev picker)' })
 map('n', '<leader>gg', M.lazygit_float,  { desc = 'Lazygit (work tree)' })
 map('n', '<leader>1',  function() jump('top') end,   { desc = 'Go to top terminal' })
 map('n', '<leader>2',  function() jump('shell') end, { desc = 'Go to bottom terminal' })
@@ -358,7 +368,16 @@ if AUTO_BOOT then
       if #vim.api.nvim_list_uis() == 0 then return end
       local a = vim.fn.argv()
       local boot = (#a == 0) or (#a == 1 and vim.fn.isdirectory(a[1]) == 1)
-      if boot then vim.schedule(M.open_workspace) end
+      if boot then
+        vim.schedule(function()
+          local ok, splash = pcall(require, 'config.splash')
+          if ok and splash and splash.show then
+            splash.show(M.open_workspace)
+          else
+            M.open_workspace()
+          end
+        end)
+      end
     end,
   })
 end

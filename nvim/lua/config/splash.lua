@@ -423,7 +423,7 @@ local function finish()
   if on_done_cb then
     local cb = on_done_cb
     on_done_cb = nil
-    cb(committed)
+    vim.schedule(function() cb(committed) end)
   end
 end
 
@@ -555,6 +555,10 @@ end
 function M.show(on_done, opts)
   if not enabled or #vim.api.nvim_list_uis() == 0 then
     return on_done()
+  end
+  if win and vim.api.nvim_win_is_valid(win) then
+    pcall(vim.api.nvim_set_current_win, win)
+    return
   end
   cols = vim.o.columns
   rows = math.max(1, vim.o.lines - 1)

@@ -119,31 +119,36 @@ function M.editor_winid()
 end
 
 function M.open_workspace()
+  if rebuilding then return end
   rebuilding = true
+
   cleanup()
   vim.cmd('only')
 
-  spawn_term(git_bash(), 'top')
-  local top_win = vim.api.nvim_get_current_win()
+  local function build()
+    spawn_term(git_bash(), 'top')
+    local top_win = vim.api.nvim_get_current_win()
 
-  vim.cmd('belowright split')
-  spawn_term(git_bash(), 'shell')
-  vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
+    vim.cmd('belowright split')
+    spawn_term(git_bash(), 'shell')
+    vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
 
-  pcall(vim.cmd, 'Neotree show filesystem left')
+    pcall(vim.cmd, 'Neotree show filesystem left')
 
-  local function focus_top()
-    if vim.api.nvim_win_is_valid(top_win) then
-      vim.api.nvim_set_current_win(top_win)
-      vim.cmd('startinsert')
+    local function focus_top()
+      if vim.api.nvim_win_is_valid(top_win) then
+        vim.api.nvim_set_current_win(top_win)
+        vim.cmd('startinsert')
+      end
     end
-  end
-  vim.schedule(function()
-    rebuilding = false
+
     vim.cmd('redraw!')
     focus_top()
-  end)
-  vim.defer_fn(focus_top, 50)
+    vim.defer_fn(focus_top, 50)
+    rebuilding = false
+  end
+
+  vim.defer_fn(build, 40)
 end
 
 function M.lazygit_float()

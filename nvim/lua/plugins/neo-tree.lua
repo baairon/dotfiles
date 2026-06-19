@@ -1,0 +1,56 @@
+return {
+  'nvim-neo-tree/neo-tree.nvim',
+  branch = 'v3.x',
+  cmd = 'Neotree',
+  dependencies = {
+    'nvim-lua/plenary.nvim',
+    'MunifTanjim/nui.nvim',
+    { 'nvim-tree/nvim-web-devicons', opts = {} },
+  },
+  opts = {
+    close_if_last_window = true,
+    popup_border_style = 'rounded',
+    enable_git_status = true,
+    enable_diagnostics = false,
+    commands = {
+      cockpit_open = function(state)
+        local node = state.tree:get_node()
+        if not node then return end
+        if node.type == 'directory' then
+          require('neo-tree.sources.filesystem').toggle_directory(state, node)
+          return
+        end
+        local path = node.path or node:get_id()
+        if not path then return end
+        local win = require('config.layout').editor_winid()
+        if win == 0 or not vim.api.nvim_win_is_valid(win) then
+          win = vim.api.nvim_get_current_win()
+        end
+        vim.api.nvim_set_current_win(win)
+        vim.cmd('edit ' .. vim.fn.fnameescape(path))
+      end,
+    },
+    default_component_configs = {
+      git_status = {
+        symbols = {
+          added = '+', modified = '~', deleted = 'x', renamed = '>',
+          untracked = '?', ignored = '.', unstaged = '!', staged = 'S', conflict = 'C',
+        },
+      },
+    },
+    window = {
+      width = 30,
+      mappings = {
+        ['<cr>'] = 'cockpit_open',
+        ['o'] = 'cockpit_open',
+        ['<2-LeftMouse>'] = 'cockpit_open',
+      },
+    },
+    filesystem = {
+      bind_to_cwd = true,
+      follow_current_file = { enabled = true },
+      use_libuv_file_watcher = true,
+      filtered_items = { hide_dotfiles = false, hide_gitignored = false },
+    },
+  },
+}

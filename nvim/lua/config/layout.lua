@@ -1,7 +1,5 @@
 local M = {}
 
-local rebuilding = false
-local closing = false
 local quitting = false
 
 local AUTO_BOOT = true
@@ -100,16 +98,6 @@ local function spawn_term(cmd, kind)
   vim.wo.winbar = WINBAR
 end
 
-local function cleanup()
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    local ok, val = pcall(vim.api.nvim_buf_get_var, buf, 'workspace_term')
-    if ok and val and vim.api.nvim_buf_is_valid(buf) then
-      pcall(vim.api.nvim_buf_delete, buf, { force = true })
-    end
-  end
-  pcall(vim.cmd, 'Neotree close')
-end
-
 function M.editor_winid()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local ok, v = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
@@ -118,37 +106,20 @@ function M.editor_winid()
   return 0
 end
 
-function M.open_workspace()
-  if rebuilding then return end
-  rebuilding = true
+function M.build_layout()
+  spawn_term(git_bash(), 'top')
+  local top_win = vim.api.nvim_get_current_win()
 
-  cleanup()
-  vim.cmd('only')
+  vim.cmd('belowright split')
+  spawn_term(git_bash(), 'shell')
+  vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
 
-  local function build()
-    spawn_term(git_bash(), 'top')
-    local top_win = vim.api.nvim_get_current_win()
+  pcall(vim.cmd, 'Neotree show filesystem left')
 
-    vim.cmd('belowright split')
-    spawn_term(git_bash(), 'shell')
-    vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
-
-    pcall(vim.cmd, 'Neotree show filesystem left')
-
-    local function focus_top()
-      if vim.api.nvim_win_is_valid(top_win) then
-        vim.api.nvim_set_current_win(top_win)
-        vim.cmd('startinsert')
-      end
-    end
-
-    vim.cmd('redraw!')
-    focus_top()
-    vim.defer_fn(focus_top, 50)
-    rebuilding = false
+  if vim.api.nvim_win_is_valid(top_win) then
+    vim.api.nvim_set_current_win(top_win)
+    vim.cmd('startinsert')
   end
-
-  vim.defer_fn(build, 40)
 end
 
 function M.lazygit_float()
@@ -191,7 +162,7 @@ local function jump(kind)
       return
     end
   end
-  vim.notify('no ' .. kind .. ' terminal (run <leader>w first)', vim.log.levels.INFO)
+  vim.notify('no ' .. kind .. ' terminal', vim.log.levels.INFO)
 end
 
 local function rotate_term()
@@ -202,10 +173,7 @@ local function rotate_term()
       if ok and wp == kind then wins[#wins + 1] = win end
     end
   end
-  if #wins == 0 then
-    vim.notify('no workspace terminals (run <leader>w)', vim.log.levels.INFO)
-    return
-  end
+  if #wins == 0 then return end
   local cur, idx = vim.api.nvim_get_current_win(), 0
   for i, w in ipairs(wins) do if w == cur then idx = i end end
   vim.api.nvim_set_current_win(wins[(idx % #wins) + 1])
@@ -217,38 +185,32 @@ local function add_term_to_panel()
   spawn_term(git_bash(), panel)
 end
 
+local function hop_or_close(win, panel, exclude)
+  local others = {}
+  for _, b in ipairs(panel_bufs(panel)) do if b ~= exclude then others[#others + 1] = b end end
+  if #others > 0 then
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_set_buf(win, others[#others]) end
+    return true
+  end
+  if vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
+  return false
+end
+
 local function close_tab()
   local panel = vim.b.workspace_panel
   if not panel then return end
   local cur = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
-  local force = vim.bo[cur].buftype == 'terminal'
-  local others = {}
-  for _, b in ipairs(panel_bufs(panel)) do if b ~= cur then others[#others + 1] = b end end
-  closing = true
-  if #others > 0 then
-    vim.api.nvim_win_set_buf(win, others[#others])
-    local ok, err = pcall(vim.api.nvim_buf_delete, cur, { force = force })
-    if not ok then vim.notify(err, vim.log.levels.ERROR) end
+  hop_or_close(win, panel, cur)
+  if vim.bo[cur].buftype == 'terminal' then
+    local okc, chan = pcall(function() return vim.bo[cur].channel end)
+    if okc and chan and chan > 0 then pcall(vim.fn.jobstop, chan) end
   else
-    local ok, err = pcall(vim.api.nvim_buf_delete, cur, { force = force })
-    if not ok then vim.notify(err, vim.log.levels.ERROR) end
-    if ok and vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
+    pcall(vim.api.nvim_buf_delete, cur, { force = false })
   end
-  closing = false
 end
 
 local map = vim.keymap.set
-map('n', '<leader>w',  function()
-  require('config.splash').show(function(launched)
-    if launched then M.open_workspace() end
-  end, { animate = false })
-end, { desc = 'Workspace main menu' })
-map('n', '<leader>W',  function()
-  require('config.splash').show(function(launched)
-    if launched then M.open_workspace() end
-  end, { view = 'dirs', animate = false })
-end, { desc = 'Switch workspace (~/dev picker)' })
 map('n', '<leader>gg', M.lazygit_float,  { desc = 'Lazygit (work tree)' })
 map('n', '<leader>1',  function() jump('top') end,   { desc = 'Go to top terminal' })
 map('n', '<leader>2',  function() jump('shell') end, { desc = 'Go to bottom terminal' })
@@ -301,11 +263,18 @@ vim.api.nvim_create_autocmd('TermRequest', {
   end,
 })
 
-vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter' }, {
+vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter', 'TermOpen' }, {
   callback = function(args)
-    if vim.bo[args.buf].buftype ~= 'terminal' then
-      vim.schedule(function() vim.cmd('stopinsert') end)
-    end
+    local buf = args.buf
+    vim.schedule(function()
+      if not vim.api.nvim_buf_is_valid(buf) then return end
+      if vim.api.nvim_get_current_buf() ~= buf then return end
+      if vim.bo[buf].buftype == 'terminal' then
+        vim.cmd('startinsert')
+      else
+        vim.cmd('stopinsert')
+      end
+    end)
   end,
 })
 
@@ -339,26 +308,17 @@ vim.api.nvim_create_autocmd({ 'ExitPre', 'VimLeavePre' }, {
 
 vim.api.nvim_create_autocmd('TermClose', {
   callback = function(args)
-    if rebuilding or closing or quitting then return end
+    if quitting then return end
     local buf = args.buf
-    local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
-    if not ok or (panel ~= 'top' and panel ~= 'shell') then return end
     vim.schedule(function()
       if quitting then return end
-      local win
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        if vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == buf then win = w; break end
-      end
-      local others = {}
-      for _, b in ipairs(panel_bufs(panel)) do
-        if b ~= buf then others[#others + 1] = b end
-      end
-      if win and vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_current_win(win)
-        if #others > 0 then
-          vim.api.nvim_win_set_buf(win, others[#others])
-        else
-          spawn_term(git_bash(), panel)
+      local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
+      if ok and panel then
+        for _, w in ipairs(vim.api.nvim_list_wins()) do
+          if vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == buf then
+            hop_or_close(w, panel, buf)
+            break
+          end
         end
       end
       if vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
@@ -377,9 +337,11 @@ if AUTO_BOOT then
         vim.schedule(function()
           local ok, splash = pcall(require, 'config.splash')
           if ok and splash and splash.show then
-            splash.show(M.open_workspace)
+            splash.show(function(launched)
+              if launched then M.build_layout() end
+            end)
           else
-            M.open_workspace()
+            M.build_layout()
           end
         end)
       end

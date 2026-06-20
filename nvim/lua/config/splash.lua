@@ -28,8 +28,10 @@ local IC = {
   play    = string.char(0xEF, 0x81, 0x8B),
   history = string.char(0xEF, 0x87, 0x9A),
   folder  = string.char(0xEF, 0x81, 0xBC),
+  explore = string.char(0xEF, 0x84, 0x95),
   power   = string.char(0xEF, 0x80, 0x91),
   dir     = string.char(0xEF, 0x81, 0xBB),
+  back    = string.char(0xEF, 0x81, 0xA0),
   marker  = string.char(0xE2, 0x9D, 0xAF),
 }
 
@@ -37,6 +39,7 @@ local MENU = {
   { icon = IC.play,    label = "Launch",          action = "launch",  key = "l" },
   { icon = IC.history, label = "Restore Session", action = "restore", key = "r" },
   { icon = IC.folder,  label = "New Session",     action = "new",     key = "n" },
+  { icon = IC.explore, label = "Open Folder",     action = "explore", key = "o" },
   { icon = IC.power,   label = "Quit",            action = "quit",    key = "q" },
 }
 
@@ -185,11 +188,12 @@ local ARROW_DOWN = "\226\150\188"
 local function draw_dirpicker()
   local menu_w = 26
   local left = math.floor((cols - menu_w) / 2)
+  local count = #dev_dirs + 1
   local avail = rows - 2
   local max_vis = math.max(1, math.floor((avail - 2) / MENU_ROW_STEP))
-  max_vis = math.min(max_vis, #dev_dirs)
+  max_vis = math.min(max_vis, count)
   local scroll = math.max(0, dir_sel - max_vis)
-  local vis = math.min(max_vis, #dev_dirs - scroll)
+  local vis = math.min(max_vis, count - scroll)
   local block_h = 2 + (vis - 1) * MENU_ROW_STEP + 1
   local top = math.max(1, math.floor((rows - block_h) / 2))
   local title_row = top
@@ -207,25 +211,27 @@ local function draw_dirpicker()
   local last_r = list_top
   for i = 1, max_vis do
     local di = i + scroll
-    if di > #dev_dirs then break end
+    if di > count then break end
     local r = list_top + (i - 1) * MENU_ROW_STEP
     if r >= rows - 1 then break end
     last_r = r
     local on = (di == dir_sel)
+    local icon, label, off = IC.dir, dev_dirs[di - 1], 5
+    if di == 1 then icon, label, off = IC.back, "Back", 3 end
     if on then
       rowbg[r] = { c1 = left, c2 = left + menu_w }
       put(left, r, IC.marker, 8)
     end
-    put(left + 2, r, IC.dir, on and 8 or 5)
-    local nc = split_chars(dev_dirs[di])
+    put(left + 2, r, icon, on and 8 or off)
+    local nc = split_chars(label)
     local cp = left + 5
     for j = 1, #nc do
-      if nc[j] ~= " " then put(cp, r, nc[j], on and 8 or 5) end
+      if nc[j] ~= " " then put(cp, r, nc[j], on and 8 or off) end
       cp = cp + 1
     end
   end
 
-  if scroll + max_vis < #dev_dirs then
+  if scroll + max_vis < count then
     put(left + math.floor(menu_w / 2), last_r + 1, ARROW_DOWN, 3)
   end
 end
@@ -346,8 +352,8 @@ local function move_sel(d)
   if committed then return end
   if view == "menu" then
     sel = ((sel - 1 + d) % #MENU) + 1
-  elseif #dev_dirs > 0 then
-    dir_sel = ((dir_sel - 1 + d) % #dev_dirs) + 1
+  else
+    dir_sel = ((dir_sel - 1 + d) % (#dev_dirs + 1)) + 1
   end
 end
 
@@ -359,8 +365,10 @@ end
 local function activate()
   if committed then return end
   if view == "dirs" then
-    if #dev_dirs > 0 and dir_sel >= 1 and dir_sel <= #dev_dirs then
-      chosen_dir = DEV_DIR .. "/" .. dev_dirs[dir_sel]
+    if dir_sel == 1 then
+      view = "menu"
+    elseif dir_sel >= 2 and dir_sel <= #dev_dirs + 1 then
+      chosen_dir = DEV_DIR .. "/" .. dev_dirs[dir_sel - 1]
       commit()
     end
     return
@@ -377,11 +385,13 @@ local function activate()
       commit()
     end
   elseif item.action == "new" then
+    if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
     scan_dev_dirs()
-    if #dev_dirs > 0 then
-      view = "dirs"
-      dir_sel = 1
-    end
+    view = "dirs"
+    dir_sel = (#dev_dirs > 0) and 2 or 1
+  elseif item.action == "explore" then
+    if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
+    if vim.fn.isdirectory(DEV_DIR) == 1 then pcall(vim.ui.open, DEV_DIR) end
   end
 end
 
@@ -465,6 +475,7 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
+  kmap("o", function() shortcut("o") end)
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
   render()
 end

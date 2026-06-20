@@ -29,6 +29,7 @@ o.timeoutlen = 400
 o.ttimeoutlen = 50
 o.showmode = false
 o.shortmess:append('I')
+o.fillchars:append({ eob = ' ', diff = ' ' })
 
 o.laststatus = 3
 function _G.WorkspaceGitBranch()

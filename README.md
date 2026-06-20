@@ -1,6 +1,6 @@
 # dotfiles
 
-Personal terminal and editor configuration: a minimal two-panel Neovim workspace
+Personal terminal and editor configuration: a rich multi-panel Neovim workspace
 and a debloated, low-latency Tabby profile.
 
 ## Layout

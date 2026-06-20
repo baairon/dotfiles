@@ -206,7 +206,7 @@ terminal:
   fontWeightBold: 600
   paletteGenerate: false
   paletteHarmonious: false
-  fontSize: 15
+  fontSize: 14
   cursor: block
   font: Hack Nerd Font
 ssh: {}

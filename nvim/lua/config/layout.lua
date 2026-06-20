@@ -58,9 +58,22 @@ local function build_winbar(win)
       local nm = term_name(b)
       seen[nm] = (seen[nm] or 0) + 1
       label = (termtotal[nm] > 1) and (nm .. ' ' .. seen[nm]) or nm
+      label = ' ' .. label
     else
       local n = vim.api.nvim_buf_get_name(b)
-      label = (n ~= '' and vim.fn.fnamemodify(n, ':t')) or '[new]'
+      if n ~= '' then
+        local basename = vim.fn.fnamemodify(n, ':t')
+        local ext = vim.fn.fnamemodify(n, ':e')
+        local icon = ''
+        local ok, devicons = pcall(require, 'nvim-web-devicons')
+        if ok then
+          local ic = devicons.get_icon(basename, ext, { default = true })
+          if ic then icon = ic .. ' ' end
+        end
+        label = icon .. basename
+      else
+        label = '[new]'
+      end
     end
     local hl = (b == buf) and '%#TabLineSel#' or '%#TabLine#'
     parts[#parts + 1] = '%' .. b .. '@v:lua.WorkspaceTabClick@' .. hl .. ' ' .. label .. ' %X'
@@ -127,11 +140,41 @@ function M.build_layout()
   vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
 
   pcall(vim.cmd, 'Neotree show filesystem left')
+  pcall(vim.cmd, 'Neotree show git_status right')
 
-  if vim.api.nvim_win_is_valid(top_win) then
-    vim.api.nvim_set_current_win(top_win)
-    vim.cmd('startinsert')
+  local function focus_top()
+    if vim.api.nvim_win_is_valid(top_win) then
+      vim.api.nvim_set_current_win(top_win)
+      vim.cmd('startinsert')
+    end
   end
+
+  local gitstat = require('config.gitstat')
+  local function restore_shell_height()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local ok, wp = pcall(vim.api.nvim_win_get_var, w, 'workspace_winpanel')
+      if ok and wp == 'shell' then
+        pcall(vim.api.nvim_win_set_height, w, math.floor((vim.o.lines - 2) / 3))
+        return
+      end
+    end
+  end
+  local tries = 0
+  local function settle()
+    tries = tries + 1
+    if gitstat.rail_win() then
+      pcall(gitstat.open)
+      pcall(gitstat.refresh)
+      restore_shell_height()
+      focus_top()
+    elseif tries < 25 then
+      vim.defer_fn(settle, 30)
+    else
+      restore_shell_height()
+      focus_top()
+    end
+  end
+  vim.defer_fn(settle, 30)
 end
 
 function M.lazygit_float()
@@ -156,6 +199,14 @@ function M.lazygit_float()
     end,
   })
   vim.cmd('startinsert')
+end
+
+function M.diff_close_to_file()
+  pcall(vim.cmd, 'DiffviewClose')
+  local win = M.editor_winid()
+  if win ~= 0 and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_set_current_win(win)
+  end
 end
 
 local function jump(kind)
@@ -210,7 +261,15 @@ end
 
 local function close_tab()
   local panel = vim.b.workspace_panel
-  if not panel then return end
+  if not panel then
+    local ok, wp = pcall(vim.api.nvim_win_get_var, 0, 'workspace_winpanel')
+    if ok and wp then
+      panel = wp
+      vim.b.workspace_panel = wp
+    else
+      return
+    end
+  end
   local cur = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   hop_or_close(win, panel, cur)
@@ -218,8 +277,31 @@ local function close_tab()
     local okc, chan = pcall(function() return vim.bo[cur].channel end)
     if okc and chan and chan > 0 then pcall(vim.fn.jobstop, chan) end
   else
-    pcall(vim.api.nvim_buf_delete, cur, { force = false })
+    pcall(vim.api.nvim_buf_delete, cur, { force = true })
   end
+  refresh_winbars()
+end
+
+local function is_aux(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  local ok, src = pcall(function() return vim.b[buf].neo_tree_source end)
+  if ok and src == 'git_status' then return true end
+  local ok2, gs = pcall(function() return vim.b[buf].workspace_gitstat end)
+  return ok2 and gs == true
+end
+
+function M.cycle_panes(dir)
+  dir = dir or 1
+  local cur, wins = vim.api.nvim_get_current_win(), {}
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_config(w).relative == '' and not is_aux(w) then
+      wins[#wins + 1] = w
+    end
+  end
+  if #wins < 2 then return end
+  local idx = 1
+  for i, w in ipairs(wins) do if w == cur then idx = i end end
+  vim.api.nvim_set_current_win(wins[((idx - 1 + dir) % #wins) + 1])
 end
 
 local map = vim.keymap.set
@@ -228,17 +310,16 @@ map('n', '<leader>1',  function() jump('top') end,   { desc = 'Go to top termina
 map('n', '<leader>2',  function() jump('shell') end, { desc = 'Go to bottom terminal' })
 map('n', '<leader>tr', rotate_term, { desc = 'Rotate between panels' })
 
-local function from_term(fn)
-  return function()
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'nx', false)
-    fn()
-  end
-end
+M._close_tab = close_tab
+M._add_term = add_term_to_panel
+
 map('n', '<leader>t', add_term_to_panel, { desc = 'New terminal tab (panel)' })
 map('n', '<A-t>', add_term_to_panel, { desc = 'New terminal tab (panel)' })
-map('t', '<A-t>', from_term(add_term_to_panel), { desc = 'New terminal tab (panel)' })
+map('t', '<A-t>', '<C-\\><C-n><cmd>lua require("config.layout")._add_term()<CR>', { desc = 'New terminal tab (panel)' })
 map('n', '<A-w>', close_tab, { desc = 'Close tab (panel)' })
-map('t', '<A-w>', from_term(close_tab), { desc = 'Close tab (panel)' })
+map('t', '<A-w>', '<C-\\><C-n><cmd>lua require("config.layout")._close_tab()<CR>', { desc = 'Close tab (panel)' })
+map('n', '<A-o>', function() M.cycle_panes(1) end, { desc = 'Cycle panes (skip git rail/stats)' })
+map('t', '<A-o>', '<C-\\><C-n><cmd>lua require("config.layout").cycle_panes(1)<CR>', { desc = 'Cycle panes (skip git rail/stats)' })
 
 local function jump_to_tab(n)
   local ok, panel = pcall(vim.api.nvim_win_get_var, 0, 'workspace_winpanel')
@@ -247,11 +328,12 @@ local function jump_to_tab(n)
   if n > #bufs then return end
   vim.api.nvim_win_set_buf(0, bufs[n])
 end
+M._jump_to_tab = jump_to_tab
 
 for i = 1, 9 do
   local fn = function() jump_to_tab(i) end
   map('n', '<A-' .. i .. '>', fn, { desc = 'Tab ' .. i .. ' (panel)' })
-  map('t', '<A-' .. i .. '>', from_term(fn), { desc = 'Tab ' .. i .. ' (panel)' })
+  map('t', '<A-' .. i .. '>', '<C-\\><C-n><cmd>lua require("config.layout")._jump_to_tab(' .. i .. ')<CR>', { desc = 'Tab ' .. i .. ' (panel)' })
 end
 
 local function osc7_path(seq)
@@ -290,29 +372,31 @@ vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter', 'TermOpen' }, {
   end,
 })
 
+vim.api.nvim_create_autocmd('FocusGained', {
+  callback = function()
+    local buf = vim.api.nvim_get_current_buf()
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf
+        and vim.bo[buf].buftype == 'terminal' then
+        vim.cmd('startinsert')
+      end
+    end)
+  end,
+})
+
 vim.api.nvim_create_autocmd('BufWinEnter', {
   callback = function(args)
     local buf = args.buf
     if vim.bo[buf].buftype == '' and vim.api.nvim_buf_get_name(buf) ~= ''
       and not vim.b[buf].workspace_panel then
-      vim.b[buf].workspace_panel = vim.w.workspace_winpanel or 'top'
+      local wp = vim.w.workspace_winpanel
+      if wp then vim.b[buf].workspace_panel = wp end
     end
     refresh_winbars()
   end,
 })
 
-vim.api.nvim_create_autocmd('WinLeave', {
-  callback = function()
-    if vim.bo.buftype ~= 'terminal' then return end
-    local win = vim.api.nvim_get_current_win()
-    vim.schedule(function()
-      if vim.api.nvim_win_is_valid(win) then
-        local b = vim.api.nvim_win_get_buf(win)
-        pcall(vim.api.nvim_win_set_cursor, win, { vim.api.nvim_buf_line_count(b), 0 })
-      end
-    end)
-  end,
-})
+
 
 vim.api.nvim_create_autocmd({ 'ExitPre', 'VimLeavePre' }, {
   callback = function() quitting = true end,
@@ -338,6 +422,8 @@ vim.api.nvim_create_autocmd('TermClose', {
     end)
   end,
 })
+
+pcall(function() require('config.gitstat').setup() end)
 
 if AUTO_BOOT then
   vim.api.nvim_create_autocmd('VimEnter', {

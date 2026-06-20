@@ -22,6 +22,9 @@ local function paint()
   set(0, 'Cursor',          { fg = BG, bg = '#cfd6e6' })
   set(0, 'lCursor',         { fg = BG, bg = '#cfd6e6' })
   set(0, 'TermCursor',      { fg = BG, bg = '#cfd6e6' })
+  set(0, 'WorkspaceDiffAdd', { fg = '#3fb950' })
+  set(0, 'WorkspaceDiffDel', { fg = '#f85149' })
+  set(0, 'WorkspaceDiffDim', { fg = '#6b7280' })
 end
 
 paint()

@@ -49,11 +49,22 @@ local function split_chars(s)
   return t
 end
 
+local function is_blank(ch)
+  return ch == " " or ch == "\227\128\128"
+end
+
 local BANNER_C = {}
-local BANNER_W = 0
+local BANNER_DW = 0
 for i = 1, #BANNER do
-  BANNER_C[i] = split_chars(BANNER[i])
-  if #BANNER_C[i] > BANNER_W then BANNER_W = #BANNER_C[i] end
+  local chars = split_chars(BANNER[i])
+  BANNER_C[i] = chars
+  local last = 0
+  for j = 1, #chars do
+    if not is_blank(chars[j]) then last = j end
+  end
+  local w = 0
+  for j = 1, last do w = w + vim.api.nvim_strwidth(chars[j]) end
+  if w > BANNER_DW then BANNER_DW = w end
 end
 
 local MENU_GAP = 4
@@ -66,6 +77,7 @@ end
 
 local cols, rows = 0, 0
 local chargrid, colgrid = {}, {}
+local rowbg = {}
 local win, buf, ns
 local on_done_cb, done = nil, false
 local saved_guicursor
@@ -78,6 +90,7 @@ local committed = false
 
 local function clear()
   for i = 1, rows * cols do chargrid[i] = " "; colgrid[i] = 0 end
+  for k in pairs(rowbg) do rowbg[k] = nil end
 end
 
 local function put(c, r, ch, ci)
@@ -91,8 +104,9 @@ local function setup_hl()
   local BG = get_bg()
   vim.api.nvim_set_hl(0, "SplashBase", { fg = PALETTE[2], bg = BG })
   vim.api.nvim_set_hl(0, "SplashCursor", { fg = BG, bg = BG })
+  vim.api.nvim_set_hl(0, "SplashSel", { bg = "#0e141d" })
   for i = 1, 8 do
-    vim.api.nvim_set_hl(0, "SplashG" .. i, { fg = PALETTE[i], bg = BG })
+    vim.api.nvim_set_hl(0, "SplashG" .. i, { fg = PALETTE[i] })
   end
 end
 
@@ -127,13 +141,19 @@ local function scan_dev_dirs()
 end
 
 local function draw_banner()
-  local left = math.floor((cols - BANNER_W) / 2)
+  local left = math.floor((cols - BANNER_DW) / 2)
   local top = content_top(rows)
   for r = 1, #BANNER_C do
     local line = BANNER_C[r]
+    local dc = left
     for c = 1, #line do
       local ch = line[c]
-      if ch ~= " " then put(left + c - 1, top + r - 1, ch, 8) end
+      local w = vim.api.nvim_strwidth(ch)
+      if not is_blank(ch) then
+        put(dc, top + r - 1, ch, 8)
+        for k = 1, w - 1 do put(dc + k, top + r - 1, "", 8) end
+      end
+      dc = dc + w
     end
   end
 end
@@ -159,30 +179,43 @@ local function draw_menu()
   end
 end
 
+local ARROW_UP = "\226\150\178"
+local ARROW_DOWN = "\226\150\188"
+
 local function draw_dirpicker()
   local menu_w = 26
   local left = math.floor((cols - menu_w) / 2)
-  local btop = content_top(rows)
-  local mtop = btop + #BANNER_C + MENU_GAP
-  local title = "~/dev"
-  local tc = split_chars(title)
-  local list_top = mtop + MENU_ROW_STEP
-  local max_vis = math.max(1, math.floor((rows - list_top - 1) / MENU_ROW_STEP))
+  local avail = rows - 2
+  local max_vis = math.max(1, math.floor((avail - 2) / MENU_ROW_STEP))
   max_vis = math.min(max_vis, #dev_dirs)
   local scroll = math.max(0, dir_sel - max_vis)
+  local vis = math.min(max_vis, #dev_dirs - scroll)
+  local block_h = 2 + (vis - 1) * MENU_ROW_STEP + 1
+  local top = math.max(1, math.floor((rows - block_h) / 2))
+  local title_row = top
+  local list_top = top + 2
 
+  local tc = split_chars("~/dev")
   local tp = left + 2
   for _, ch in ipairs(tc) do
-    if ch ~= " " then put(tp, mtop, ch, 7) end
+    if ch ~= " " then put(tp, title_row, ch, 7) end
     tp = tp + 1
   end
+
+  if scroll > 0 then put(left + math.floor(menu_w / 2), list_top - 1, ARROW_UP, 3) end
+
+  local last_r = list_top
   for i = 1, max_vis do
     local di = i + scroll
     if di > #dev_dirs then break end
     local r = list_top + (i - 1) * MENU_ROW_STEP
-    if r >= rows then break end
+    if r >= rows - 1 then break end
+    last_r = r
     local on = (di == dir_sel)
-    if on then put(left, r, IC.marker, 8) end
+    if on then
+      rowbg[r] = { c1 = left, c2 = left + menu_w }
+      put(left, r, IC.marker, 8)
+    end
     put(left + 2, r, IC.dir, on and 8 or 5)
     local nc = split_chars(dev_dirs[di])
     local cp = left + 5
@@ -190,6 +223,10 @@ local function draw_dirpicker()
       if nc[j] ~= " " then put(cp, r, nc[j], on and 8 or 5) end
       cp = cp + 1
     end
+  end
+
+  if scroll + max_vis < #dev_dirs then
+    put(left + math.floor(menu_w / 2), last_r + 1, ARROW_DOWN, 3)
   end
 end
 
@@ -210,11 +247,13 @@ local function draw_footer()
 end
 
 local function flush()
-  local lines, hls = {}, {}
+  local lines, hls, bgmarks = {}, {}, {}
   for r = 0, rows - 1 do
     local rowchars, bytepos = {}, 0
     local run_start, run_ci = 0, nil
     local b = r * cols
+    local bg = rowbg[r]
+    local bg_s, bg_e = nil, nil
     for c = 0, cols - 1 do
       local idx = b + c + 1
       local ch = chargrid[idx]
@@ -229,15 +268,24 @@ local function flush()
         hls[#hls + 1] = { r, run_start, bytepos, run_ci }
         run_ci = nil
       end
+      if bg then
+        if c == bg.c1 then bg_s = bytepos end
+        if c == bg.c2 then bg_e = bytepos end
+      end
       bytepos = bytepos + #ch
     end
     if run_ci then hls[#hls + 1] = { r, run_start, bytepos, run_ci } end
+    if bg and bg_s then bgmarks[#bgmarks + 1] = { r, bg_s, bg_e or bytepos } end
     lines[r + 1] = table.concat(rowchars)
   end
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  for i = 1, #bgmarks do
+    local m = bgmarks[i]
+    vim.api.nvim_buf_set_extmark(buf, ns, m[1], m[2], { end_col = m[3], hl_group = "SplashSel", priority = 1 })
+  end
   for i = 1, #hls do
     local h = hls[i]
     vim.api.nvim_buf_set_extmark(buf, ns, h[1], h[2], { end_col = h[3], hl_group = "SplashG" .. h[4] })
@@ -272,8 +320,8 @@ local function render()
   end
   local ok = pcall(function()
     clear()
-    draw_banner()
     if view == "menu" then
+      draw_banner()
       draw_menu()
     else
       draw_dirpicker()

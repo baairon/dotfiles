@@ -38,10 +38,9 @@ local function term_name(b)
   return (ok and cmd) and vim.fn.fnamemodify(cmd, ':t:r') or 'term'
 end
 
-function _G.WorkspaceWinbar()
-  local win = vim.g.statusline_winid
-  local buf = (win and win ~= 0 and vim.api.nvim_win_is_valid(win))
-    and vim.api.nvim_win_get_buf(win) or vim.api.nvim_get_current_buf()
+local function build_winbar(win)
+  if not vim.api.nvim_win_is_valid(win) then return '' end
+  local buf = vim.api.nvim_win_get_buf(win)
   local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
   if not ok or not panel then return '' end
   local parts = {}
@@ -70,6 +69,21 @@ function _G.WorkspaceWinbar()
   return table.concat(parts)
 end
 
+local function set_winbar(win)
+  if not vim.api.nvim_win_is_valid(win) then return end
+  local buf = vim.api.nvim_win_get_buf(win)
+  local ok, panel = pcall(function() return vim.b[buf].workspace_panel end)
+  if ok and panel then
+    vim.wo[win].winbar = build_winbar(win)
+  end
+end
+
+local function refresh_winbars()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    set_winbar(win)
+  end
+end
+
 function _G.WorkspaceTabClick(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
   local ok, panel = pcall(function() return vim.b[bufnr].workspace_panel end)
@@ -85,8 +99,6 @@ function _G.WorkspaceTabClick(bufnr)
   end
 end
 
-local WINBAR = '%{%v:lua.WorkspaceWinbar()%}'
-
 local function spawn_term(cmd, kind)
   vim.cmd('enew')
   vim.fn.jobstart(cmd, { term = true, env = { PROMPT_COMMAND = OSC7_PROMPT } })
@@ -94,8 +106,8 @@ local function spawn_term(cmd, kind)
   vim.b.workspace_panel = kind
   vim.b.workspace_cmd = type(cmd) == 'table' and cmd[1] or cmd
   vim.api.nvim_win_set_var(0, 'workspace_winpanel', kind)
-  vim.cmd('setlocal nonumber norelativenumber signcolumn=no')
-  vim.wo.winbar = WINBAR
+  vim.cmd('setlocal nonumber norelativenumber signcolumn=no nocursorline scrolloff=0')
+  refresh_winbars()
 end
 
 function M.editor_winid()
@@ -281,11 +293,11 @@ vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter', 'TermOpen' }, {
 vim.api.nvim_create_autocmd('BufWinEnter', {
   callback = function(args)
     local buf = args.buf
-    if vim.bo[buf].buftype ~= '' or vim.api.nvim_buf_get_name(buf) == '' then return end
-    if not vim.b[buf].workspace_panel then
+    if vim.bo[buf].buftype == '' and vim.api.nvim_buf_get_name(buf) ~= ''
+      and not vim.b[buf].workspace_panel then
       vim.b[buf].workspace_panel = vim.w.workspace_winpanel or 'top'
     end
-    vim.wo.winbar = WINBAR
+    refresh_winbars()
   end,
 })
 
@@ -322,6 +334,7 @@ vim.api.nvim_create_autocmd('TermClose', {
         end
       end
       if vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
+      refresh_winbars()
     end)
   end,
 })

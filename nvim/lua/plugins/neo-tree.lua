@@ -9,6 +9,7 @@ return {
   },
   opts = {
     close_if_last_window = true,
+    hide_root_node = true,
     popup_border_style = 'rounded',
     enable_git_status = true,
     enable_diagnostics = false,

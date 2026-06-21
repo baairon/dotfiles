@@ -189,9 +189,10 @@ function M.refresh()
 end
 
 function M.setup()
-  vim.api.nvim_create_autocmd({ 'BufWritePost', 'DirChanged' }, {
+  vim.api.nvim_create_autocmd({ 'BufWritePost', 'DirChanged', 'FocusGained' }, {
     callback = function(args)
       if args.event == 'DirChanged' then root_cache = {} end
+      pcall(function() require('neo-tree.sources.manager').refresh('git_status') end)
       M.refresh()
     end,
   })

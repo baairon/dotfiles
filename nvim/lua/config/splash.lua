@@ -1,20 +1,9 @@
 local M = {}
 
-local BANNER = {
-  [[⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠭⣯⡻⠿⠿⠿⠻⠿⡿⣿⣿⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢥⣽⣿⠹⡣⢴⣢⣤⣦⠬⠷⢶⢨]],
-  [[⣿⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠯⢟⢛⣼⣠⣷⣽⣿⣿⣿⡅⠄⣸⣸]],
-  [[⣿⡀⠐⠳⠶⣖⣾⠒⢢⠏⢿⣿⡀⣱⣆⢛⣏⣅⣁⣽⡻⢿⣾⡞⢁⣿]],
-  [[⣿⣧⣤⣤⡹⣩⡀⢀⠙⣵⣴⣿⠗⡉⠡⣬⢻⣿⠢⠄⠦⠄⠄⢀⣼⣿]],
-  [[⣿⣿⣿⣿⣧⡇⣠⣤⡀⠿⣿⣿⣿⣮⣤⣒⣷⣦⣄⡁⠂⠄⣠⣼⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣹⠿⠃⠄⠄⠉⠟⠹⢉⡿⠱⣼⣏⠦⠄⢀⣾⣿⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣿⣷⣶⢦⠄⣀⣤⣀⠈⠁⠂⠁⠄⠄⠠⣼⣿⣿⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣿⣿⡿⠄⣲⣾⡿⡟⢷⣤⡀⠄⠄⠄⣼⣿⣿⣿⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣿⣿⠄⣤⣼⣷⣾⡿⢶⣮⣯⡤⠄⠄⣿⣿⣿⠟⠉⣽]],
-  [[⣿⣿⣿⣿⣿⣿⣿⣟⠠⢤⣫⣺⣻⣟⣛⣦⣦⠤⠄⠄⠿⠿⠁⢀⣰⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣇⠲⠦⠿⠯⠿⠱⠯⡻⢵⣶⠆⠄⠄⠄⠄⣼⣿⣿⣿]],
-  [[⣿⣿⣿⣿⣿⣿⣟⢵⢿⡶⢄⣀⣀⣀⣀⣀⡀⢰⣾⡿⡆⢶⣿⣿⣿⣿]],
-}
+local RAMP = " .`,:;!^+*coO0@#"
+local P = { arms = 3, stars = 912, speed = 20, size = 55, twist = 0.39, noise = 0.2, glow = 0.2, twinkle = 0.55 }
+local TAU = math.pi * 2
+local SPIRAL_H = 13
 
 local PALETTE = { "#8bb8e0", "#a0c8ea", "#b4d6f2", "#c6e0f7", "#d6eafa", "#e4f0fc", "#f0f7fe", "#ffffff" }
 local BG_FALLBACK = "#030509"
@@ -39,7 +28,6 @@ local MENU = {
   { icon = IC.play,    label = "Launch",          action = "launch",  key = "l" },
   { icon = IC.history, label = "Restore Session", action = "restore", key = "r" },
   { icon = IC.folder,  label = "New Session",     action = "new",     key = "n" },
-  { icon = IC.explore, label = "Open Folder",     action = "explore", key = "o" },
   { icon = IC.power,   label = "Quit",            action = "quit",    key = "q" },
 }
 
@@ -52,36 +40,34 @@ local function split_chars(s)
   return t
 end
 
-local function is_blank(ch)
-  return ch == " " or ch == "\227\128\128"
+local function rstate_new(seed)
+  local s = seed % 2147483647
+  if s <= 0 then s = s + 2147483646 end
+  return s
 end
-
-local BANNER_C = {}
-local BANNER_DW = 0
-for i = 1, #BANNER do
-  local chars = split_chars(BANNER[i])
-  BANNER_C[i] = chars
-  local last = 0
-  for j = 1, #chars do
-    if not is_blank(chars[j]) then last = j end
-  end
-  local w = 0
-  for j = 1, last do w = w + vim.api.nvim_strwidth(chars[j]) end
-  if w > BANNER_DW then BANNER_DW = w end
+local rstate = 1
+local function rng()
+  rstate = (rstate * 16807) % 2147483647
+  return rstate / 2147483647
 end
+local function reseed(seed) rstate = rstate_new(seed) end
 
 local MENU_GAP = 4
 local MENU_ROW_STEP = 2
-local CONTENT_H = #BANNER_C + MENU_GAP + (#MENU - 1) * MENU_ROW_STEP + 1
+local CONTENT_H = SPIRAL_H + MENU_GAP + (#MENU - 1) * MENU_ROW_STEP + 1
 
 local function content_top(rows)
   return math.max(1, math.floor((rows - CONTENT_H) / 2))
 end
 
+local uv = vim.uv or vim.loop
 local cols, rows = 0, 0
 local chargrid, colgrid = {}, {}
 local rowbg = {}
-local win, buf, ns
+local acc = {}
+local gstars = {}
+local angle, clock, last = 0, 0, 0
+local win, buf, ns, timer
 local on_done_cb, done = nil, false
 local saved_guicursor
 local sel = 1
@@ -110,6 +96,66 @@ local function setup_hl()
   vim.api.nvim_set_hl(0, "SplashSel", { bg = "#0e141d" })
   for i = 1, 8 do
     vim.api.nvim_set_hl(0, "SplashG" .. i, { fg = PALETTE[i] })
+  end
+end
+
+local function seed_stars()
+  reseed(1337)
+  gstars = {}
+  for i = 0, P.stars - 1 do
+    gstars[#gstars + 1] = {
+      arm = i % P.arms,
+      rt = rng() ^ 0.55,
+      ja = rng() * 2 - 1,
+      jr = rng() * 2 - 1,
+      tw = rng() * TAU,
+      along = rng(),
+      field = rng() < 0.12,
+    }
+  end
+end
+
+local function render_spiral(cx, cy, maxR, rotation, tMs, bright)
+  bright = bright or 1
+  local twistTurns = 0.3 + P.twist * 3.0
+  local glow = P.glow
+  local n_cells = rows * cols
+  for i = 1, n_cells do acc[i] = 0 end
+  for s = 1, #gstars do
+    local st = gstars[s]
+    local ang, r
+    if st.field then
+      ang = st.along * TAU + rotation * 0.25
+      r = (0.15 + st.rt * 0.95) * maxR
+    else
+      ang = st.arm * TAU / P.arms + st.rt * twistTurns * TAU + rotation + st.ja * P.noise * 0.5
+      r = (st.rt + st.jr * P.noise * 0.05) * maxR
+    end
+    local x = math.floor(cx + math.cos(ang) * r + 0.5)
+    local y = math.floor(cy + math.sin(ang) * r * 0.5 + 0.5)
+    if x >= 0 and x < cols and y >= 0 and y < rows then
+      local core = math.exp(-st.rt * (3.2 - glow * 2.4))
+      local twk = 1 - P.twinkle * 0.55 * (0.5 + 0.5 * math.sin(tMs * 0.004 + st.tw))
+      local idx = y * cols + x + 1
+      acc[idx] = acc[idx] + core * twk * (st.field and 0.45 or 1)
+    end
+  end
+  local rlen = #RAMP
+  for r2 = 0, rows - 1 do
+    local b = r2 * cols
+    for c = 0, cols - 1 do
+      local v = acc[b + c + 1]
+      if v > 0.02 then
+        local n = math.min(1, (v ^ 0.7) * (1 + glow * 0.5)) * bright
+        if n > 0.03 then
+          local ci = math.min(rlen - 1, 1 + math.floor(n * (rlen - 1)))
+          local ch = RAMP:sub(ci + 1, ci + 1)
+          if ch ~= " " then
+            put(c, r2, ch, math.min(8, 2 + math.floor(n * 6)))
+          end
+        end
+      end
+    end
   end
 end
 
@@ -143,29 +189,19 @@ local function scan_dev_dirs()
   end
 end
 
-local function draw_banner()
-  local left = math.floor((cols - BANNER_DW) / 2)
+local function draw_spiral()
   local top = content_top(rows)
-  for r = 1, #BANNER_C do
-    local line = BANNER_C[r]
-    local dc = left
-    for c = 1, #line do
-      local ch = line[c]
-      local w = vim.api.nvim_strwidth(ch)
-      if not is_blank(ch) then
-        put(dc, top + r - 1, ch, 8)
-        for k = 1, w - 1 do put(dc + k, top + r - 1, "", 8) end
-      end
-      dc = dc + w
-    end
-  end
+  local cx = cols / 2
+  local cy = top + (SPIRAL_H - 1) / 2
+  local maxR = SPIRAL_H * 1.4
+  render_spiral(cx, cy, maxR, angle, clock * 1000, 1)
 end
 
 local function draw_menu()
   local menu_w = 26
   local left = math.floor((cols - menu_w) / 2)
   local btop = content_top(rows)
-  local mtop = btop + #BANNER_C + MENU_GAP
+  local mtop = btop + SPIRAL_H + MENU_GAP
   for i = 1, #MENU do
     local r = mtop + (i - 1) * MENU_ROW_STEP
     if r >= rows then break end
@@ -301,6 +337,11 @@ end
 local function finish()
   if done then return end
   done = true
+  if timer then
+    timer:stop()
+    if not timer:is_closing() then timer:close() end
+    timer = nil
+  end
   if saved_guicursor ~= nil then
     vim.o.guicursor = ''
     vim.o.guicursor = saved_guicursor
@@ -327,7 +368,7 @@ local function render()
   local ok = pcall(function()
     clear()
     if view == "menu" then
-      draw_banner()
+      draw_spiral()
       draw_menu()
     else
       draw_dirpicker()
@@ -338,7 +379,30 @@ local function render()
   if not ok then finish() end
 end
 
+local function tick()
+  if done then return end
+  if not (win and vim.api.nvim_win_is_valid(win) and buf and vim.api.nvim_buf_is_valid(buf)) then
+    finish()
+    return
+  end
+  local ok = pcall(function()
+    local t = uv.hrtime() / 1e9
+    local dt = t - last
+    if dt > 0.1 then dt = 0.1 end
+    last = t
+    angle = angle + dt * (P.speed * math.pi / 180)
+    clock = clock + dt
+    render()
+  end)
+  if not ok then finish() end
+end
+
 local function quit_nvim()
+  if timer then
+    timer:stop()
+    if not timer:is_closing() then timer:close() end
+    timer = nil
+  end
   if saved_guicursor ~= nil then
     vim.o.guicursor = ''
     vim.o.guicursor = saved_guicursor
@@ -389,9 +453,6 @@ local function activate()
     scan_dev_dirs()
     view = "dirs"
     dir_sel = (#dev_dirs > 0) and 2 or 1
-  elseif item.action == "explore" then
-    if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
-    if vim.fn.isdirectory(DEV_DIR) == 1 then pcall(vim.ui.open, DEV_DIR) end
   end
 end
 
@@ -429,6 +490,7 @@ function M.show(on_done)
     return on_done()
   end
   setup_hl()
+  seed_stars()
   scan_dev_dirs()
   done = false
   committed = false
@@ -436,6 +498,7 @@ function M.show(on_done)
   sel = 1
   dir_sel = 1
   chosen_dir = nil
+  angle, clock = 0, 0
   on_done_cb = on_done
   buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
@@ -475,9 +538,11 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
-  kmap("o", function() shortcut("o") end)
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
   render()
+  last = uv.hrtime() / 1e9
+  timer = uv.new_timer()
+  timer:start(0, 50, vim.schedule_wrap(tick))
 end
 
 return M

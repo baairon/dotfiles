@@ -1,7 +1,7 @@
 local M = {}
 
 local RAMP = " .`,:;!^+*coO0@#"
-local P = { arms = 3, stars = 912, speed = 20, size = 55, twist = 0.39, noise = 0.2, glow = 0.2, twinkle = 0.55 }
+local P = { arms = 3, stars = 600, speed = -30, size = 65, twist = 0.30, noise = 0.00, glow = 0.00, twinkle = 0.35 }
 local TAU = math.pi * 2
 local SPIRAL_H = 13
 

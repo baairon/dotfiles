@@ -1,7 +1,7 @@
 local M = {}
 
 local RAMP = " .`,:;!^+*coO0@#"
-local P = { arms = 3, stars = 600, speed = -30, size = 65, twist = 0.30, noise = 0.00, glow = 0.00, twinkle = 0.35 }
+local P = { arms = 3, stars = 600, speed = -38, size = 65, twist = 0.30, noise = 0.00, glow = 0.00, twinkle = 0.35 }
 local TAU = math.pi * 2
 local SPIRAL_H = 13
 
@@ -28,6 +28,7 @@ local MENU = {
   { icon = IC.play,    label = "Launch",          action = "launch",  key = "l" },
   { icon = IC.history, label = "Restore Session", action = "restore", key = "r" },
   { icon = IC.folder,  label = "New Session",     action = "new",     key = "n" },
+  { icon = IC.explore, label = "Open Folder",     action = "open",    key = "o" },
   { icon = IC.power,   label = "Quit",            action = "quit",    key = "q" },
 }
 
@@ -74,6 +75,7 @@ local sel = 1
 local chosen_dir = nil
 local view = "menu"
 local dev_dirs = {}
+local dir_items = {}
 local dir_sel = 1
 local committed = false
 
@@ -177,23 +179,50 @@ local function load_last_dir()
   return nil
 end
 
+local function open_in_os(path)
+  if type(vim.ui.open) == "function" then
+    pcall(vim.ui.open, path)
+    return
+  end
+  local cmd
+  if vim.fn.has("win32") == 1 then
+    cmd = { "cmd.exe", "/c", "start", "", path }
+  elseif vim.fn.has("macunix") == 1 then
+    cmd = { "open", path }
+  else
+    cmd = { "xdg-open", path }
+  end
+  pcall(vim.fn.jobstart, cmd, { detach = true })
+end
+
+local function build_dir_items()
+  dir_items = {
+    { kind = "back", icon = IC.back, label = "Back", off = 3 },
+  }
+  for _, name in ipairs(dev_dirs) do
+    dir_items[#dir_items + 1] = { kind = "dir", icon = IC.dir, label = name, off = 5, name = name }
+  end
+end
+
 local function scan_dev_dirs()
   dev_dirs = {}
-  if vim.fn.isdirectory(DEV_DIR) == 0 then return end
-  local entries = vim.fn.readdir(DEV_DIR)
-  table.sort(entries)
-  for _, e in ipairs(entries) do
-    if not e:match("^%.") and vim.fn.isdirectory(DEV_DIR .. "/" .. e) == 1 then
-      dev_dirs[#dev_dirs + 1] = e
+  if vim.fn.isdirectory(DEV_DIR) == 1 then
+    local entries = vim.fn.readdir(DEV_DIR)
+    table.sort(entries)
+    for _, e in ipairs(entries) do
+      if not e:match("^%.") and vim.fn.isdirectory(DEV_DIR .. "/" .. e) == 1 then
+        dev_dirs[#dev_dirs + 1] = e
+      end
     end
   end
+  build_dir_items()
 end
 
 local function draw_spiral()
   local top = content_top(rows)
   local cx = cols / 2
   local cy = top + (SPIRAL_H - 1) / 2
-  local maxR = SPIRAL_H * 1.4
+  local maxR = SPIRAL_H * 1.28
   render_spiral(cx, cy, maxR, angle, clock * 1000, 1)
 end
 
@@ -224,7 +253,7 @@ local ARROW_DOWN = "\226\150\188"
 local function draw_dirpicker()
   local menu_w = 26
   local left = math.floor((cols - menu_w) / 2)
-  local count = #dev_dirs + 1
+  local count = #dir_items
   local avail = rows - 2
   local max_vis = math.max(1, math.floor((avail - 2) / MENU_ROW_STEP))
   max_vis = math.min(max_vis, count)
@@ -252,8 +281,8 @@ local function draw_dirpicker()
     if r >= rows - 1 then break end
     last_r = r
     local on = (di == dir_sel)
-    local icon, label, off = IC.dir, dev_dirs[di - 1], 5
-    if di == 1 then icon, label, off = IC.back, "Back", 3 end
+    local it = dir_items[di]
+    local icon, label, off = it.icon, it.label, it.off
     if on then
       rowbg[r] = { c1 = left, c2 = left + menu_w }
       put(left, r, IC.marker, 8)
@@ -417,7 +446,7 @@ local function move_sel(d)
   if view == "menu" then
     sel = ((sel - 1 + d) % #MENU) + 1
   else
-    dir_sel = ((dir_sel - 1 + d) % (#dev_dirs + 1)) + 1
+    dir_sel = ((dir_sel - 1 + d) % #dir_items) + 1
   end
 end
 
@@ -429,10 +458,12 @@ end
 local function activate()
   if committed then return end
   if view == "dirs" then
-    if dir_sel == 1 then
+    local it = dir_items[dir_sel]
+    if not it then return end
+    if it.kind == "back" then
       view = "menu"
-    elseif dir_sel >= 2 and dir_sel <= #dev_dirs + 1 then
-      chosen_dir = DEV_DIR .. "/" .. dev_dirs[dir_sel - 1]
+    elseif it.kind == "dir" then
+      chosen_dir = DEV_DIR .. "/" .. it.name
       commit()
     end
     return
@@ -448,6 +479,8 @@ local function activate()
       chosen_dir = dir
       commit()
     end
+  elseif item.action == "open" then
+    open_in_os(DEV_DIR)
   elseif item.action == "new" then
     if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
     scan_dev_dirs()
@@ -538,6 +571,7 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
+  kmap("o", function() shortcut("o") end)
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
   render()
   last = uv.hrtime() / 1e9

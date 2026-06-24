@@ -17,7 +17,6 @@ local IC = {
   play    = string.char(0xEF, 0x81, 0x8B),
   history = string.char(0xEF, 0x87, 0x9A),
   folder  = string.char(0xEF, 0x81, 0xBC),
-  explore = string.char(0xEF, 0x84, 0x95),
   power   = string.char(0xEF, 0x80, 0x91),
   dir     = string.char(0xEF, 0x81, 0xBB),
   back    = string.char(0xEF, 0x81, 0xA0),
@@ -28,7 +27,6 @@ local MENU = {
   { icon = IC.play,    label = "Launch",          action = "launch",  key = "l" },
   { icon = IC.history, label = "Restore Session", action = "restore", key = "r" },
   { icon = IC.folder,  label = "New Session",     action = "new",     key = "n" },
-  { icon = IC.explore, label = "Open Folder",     action = "open",    key = "o" },
   { icon = IC.power,   label = "Quit",            action = "quit",    key = "q" },
 }
 
@@ -177,22 +175,6 @@ local function load_last_dir()
   dir = (dir or ""):gsub("%s+$", "")
   if dir ~= "" and vim.fn.isdirectory(dir) == 1 then return dir end
   return nil
-end
-
-local function open_in_os(path)
-  if type(vim.ui.open) == "function" then
-    pcall(vim.ui.open, path)
-    return
-  end
-  local cmd
-  if vim.fn.has("win32") == 1 then
-    cmd = { "cmd.exe", "/c", "start", "", path }
-  elseif vim.fn.has("macunix") == 1 then
-    cmd = { "open", path }
-  else
-    cmd = { "xdg-open", path }
-  end
-  pcall(vim.fn.jobstart, cmd, { detach = true })
 end
 
 local function build_dir_items()
@@ -479,8 +461,6 @@ local function activate()
       chosen_dir = dir
       commit()
     end
-  elseif item.action == "open" then
-    open_in_os(DEV_DIR)
   elseif item.action == "new" then
     if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
     scan_dev_dirs()
@@ -571,7 +551,6 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
-  kmap("o", function() shortcut("o") end)
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
   render()
   last = uv.hrtime() / 1e9

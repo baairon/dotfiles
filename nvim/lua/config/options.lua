@@ -28,6 +28,7 @@ o.updatetime = 250
 o.timeoutlen = 400
 o.ttimeoutlen = 50
 o.showmode = false
+o.guicursor:append('a:blinkon0')
 o.shortmess:append('I')
 o.fillchars:append({ eob = ' ', diff = ' ' })
 

@@ -177,6 +177,7 @@ hotkeys:
 terminal:
   profile: local:git-bash
   frontend: xterm
+  workingDirectory: C:\Users\bairo
   searchOptions: {}
   colorScheme:
     name: Custom

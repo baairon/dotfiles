@@ -112,9 +112,22 @@ function _G.WorkspaceTabClick(bufnr)
   end
 end
 
+local function sane_cwd()
+  local cwd = vim.fn.getcwd()
+  local sys = vim.fs.normalize(vim.env.SystemRoot or 'C:/Windows'):lower()
+  if vim.fs.normalize(cwd):lower():find(sys, 1, true) == 1 then
+    return vim.fn.expand('~')
+  end
+  return cwd
+end
+
 local function spawn_term(cmd, kind)
   vim.cmd('enew')
-  vim.fn.jobstart(cmd, { term = true, env = { PROMPT_COMMAND = OSC7_PROMPT } })
+  vim.fn.jobstart(cmd, {
+    term = true,
+    cwd = sane_cwd(),
+    env = { PROMPT_COMMAND = OSC7_PROMPT, CHERE_INVOKING = '1' },
+  })
   vim.b.workspace_term = kind
   vim.b.workspace_panel = kind
   vim.b.workspace_cmd = type(cmd) == 'table' and cmd[1] or cmd

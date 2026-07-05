@@ -148,10 +148,6 @@ function M.build_layout()
   spawn_term(git_bash(), 'top')
   local top_win = vim.api.nvim_get_current_win()
 
-  vim.cmd('belowright split')
-  spawn_term(git_bash(), 'shell')
-  vim.api.nvim_win_set_height(0, math.floor((vim.o.lines - 2) / 3))
-
   pcall(vim.cmd, 'Neotree show filesystem left')
   pcall(vim.cmd, 'Neotree show git_status right')
 
@@ -163,27 +159,16 @@ function M.build_layout()
   end
 
   local gitstat = require('config.gitstat')
-  local function restore_shell_height()
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      local ok, wp = pcall(vim.api.nvim_win_get_var, w, 'workspace_winpanel')
-      if ok and wp == 'shell' then
-        pcall(vim.api.nvim_win_set_height, w, math.floor((vim.o.lines - 2) / 3))
-        return
-      end
-    end
-  end
   local tries = 0
   local function settle()
     tries = tries + 1
     if gitstat.rail_win() then
       pcall(gitstat.open)
       pcall(gitstat.refresh)
-      restore_shell_height()
       focus_top()
     elseif tries < 25 then
       vim.defer_fn(settle, 30)
     else
-      restore_shell_height()
       focus_top()
     end
   end
@@ -241,24 +226,8 @@ local function jump(kind)
   vim.notify('no ' .. kind .. ' terminal', vim.log.levels.INFO)
 end
 
-local function rotate_term()
-  local wins = {}
-  for _, kind in ipairs({ 'top', 'shell' }) do
-    for _, win in ipairs(vim.api.nvim_list_wins()) do
-      local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
-      if ok and wp == kind then wins[#wins + 1] = win end
-    end
-  end
-  if #wins == 0 then return end
-  local cur, idx = vim.api.nvim_get_current_win(), 0
-  for i, w in ipairs(wins) do if w == cur then idx = i end end
-  vim.api.nvim_set_current_win(wins[(idx % #wins) + 1])
-end
-
 local function add_term_to_panel()
-  local panel = vim.b.workspace_panel
-  if panel ~= 'top' and panel ~= 'shell' then panel = 'shell' end
-  spawn_term(git_bash(), panel)
+  spawn_term(git_bash(), 'top')
 end
 
 local function hop_or_close(win, panel, exclude)
@@ -319,9 +288,8 @@ end
 
 local map = vim.keymap.set
 map('n', '<leader>gg', M.lazygit_float,  { desc = 'Lazygit (work tree)' })
-map('n', '<leader>1',  function() jump('top') end,   { desc = 'Go to top terminal' })
-map('n', '<leader>2',  function() jump('shell') end, { desc = 'Go to bottom terminal' })
-map('n', '<leader>tr', rotate_term, { desc = 'Rotate between panels' })
+map('n', '<leader>1',  function() jump('top') end,   { desc = 'Go to terminal' })
+map('n', '<leader>tr', function() M.cycle_panes(1) end, { desc = 'Rotate between panels' })
 
 M._close_tab = close_tab
 M._add_term = add_term_to_panel

@@ -233,7 +233,7 @@ local function draw_dirpicker()
     put(left + math.floor(menu_w / 2), last_r + 1, ARROW_DOWN, 3)
   end
 
-  put_center(rows - 3, "↵ open   c clone   d delete   esc back", 3)
+  put_center(rows - 3, "↵ open   e dev   c clone   d delete   esc back", 3)
 end
 
 local function draw_footer()
@@ -453,6 +453,27 @@ local function clone_repo()
   end)
 end
 
+local function open_in_os(path)
+  if type(vim.ui.open) == "function" then
+    pcall(vim.ui.open, path)
+    return
+  end
+  local cmd
+  if vim.fn.has("win32") == 1 then
+    cmd = { "cmd.exe", "/c", "start", "", path }
+  elseif vim.fn.has("macunix") == 1 then
+    cmd = { "open", path }
+  else
+    cmd = { "xdg-open", path }
+  end
+  pcall(vim.fn.jobstart, cmd, { detach = true })
+end
+
+local function open_dev()
+  if committed or busy or view ~= "dirs" then return end
+  open_in_os(DEV_DIR)
+end
+
 local function delete_dir()
   if committed or busy or view ~= "dirs" then return end
   local it = dir_items[dir_sel]
@@ -562,6 +583,7 @@ function M.show(on_done)
   kmap("n", function() shortcut("n") end)
   kmap("c", clone_repo)
   kmap("d", delete_dir)
+  kmap("e", open_dev)
   render()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end

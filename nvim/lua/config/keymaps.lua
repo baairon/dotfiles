@@ -24,11 +24,12 @@ map('n', '<leader>q', '<cmd>q<cr>', { desc = 'Close window' })
 map('n', '<C-s>', '<cmd>write<cr>', { desc = 'Save file' })
 
 map('n', '<leader>v', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
-map('n', '<A-V>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
+map({ 'n', 'i' }, '<A-v>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
+map({ 'n', 'i' }, '<A-V>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
 
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'markdown',
   callback = function(args)
-    map('n', '<A-p>', '<cmd>MarkdownPreviewToggle<cr>', { buffer = args.buf, desc = 'Toggle markdown preview' })
+    map({ 'n', 'i' }, '<A-p>', '<cmd>MarkdownPreviewToggle<cr>', { buffer = args.buf, desc = 'Toggle markdown preview' })
   end,
 })

@@ -1,3 +1,8 @@
+vim.g.loaded_python3_provider = 0
+vim.g.loaded_ruby_provider = 0
+vim.g.loaded_node_provider = 0
+vim.g.loaded_perl_provider = 0
+
 local o = vim.opt
 
 o.number = true
@@ -33,20 +38,6 @@ o.shortmess:append('I')
 o.fillchars:append({ eob = ' ', diff = ' ' })
 
 o.laststatus = 3
-function _G.WorkspaceGitBranch()
-  local head = vim.b.gitsigns_head
-  if head and head ~= '' then return ' (' .. head .. ') ' end
-  return ' '
-end
-o.statusline = table.concat({
-  ' %f',
-  ' %m%r',
-  '%{%v:lua.WorkspaceGitBranch()%}',
-  '%=',
-  '%y',
-  ' %l:%c ',
-  '%P ',
-})
 
 if vim.fn.has('win32') == 1 and vim.fn.executable('cmd.exe') == 1 then
   o.shell = 'cmd.exe'

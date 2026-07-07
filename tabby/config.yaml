@@ -176,7 +176,7 @@ hotkeys:
     - Ctrl-W
 terminal:
   profile: local:git-bash
-  frontend: xterm
+  frontend: xterm-webgl
   workingDirectory: C:\Users\bairo
   searchOptions: {}
   colorScheme:

@@ -72,6 +72,7 @@ local dir_items = {}
 local dir_sel = 1
 local committed = false
 local busy = nil
+local status = nil
 
 local function clear()
   for i = 1, rows * cols do chargrid[i] = " "; colgrid[i] = 0 end
@@ -200,7 +201,8 @@ local function draw_dirpicker()
   local list_top = top + 2
 
   put_str(left + 2, title_row, "~/dev", 7)
-  if busy then put_str(left + 8, title_row, busy, 6) end
+  local msg = busy or status
+  if msg then put_str(left + 8, title_row, msg, 6) end
 
   if scroll > 0 then put(left + math.floor(menu_w / 2), list_top - 1, ARROW_UP, 3) end
 
@@ -378,7 +380,7 @@ local function activate()
   elseif item.action == "new" then
     if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
     scan_dev_dirs()
-    busy = nil
+    busy, status = nil, nil
     view = "dirs"
     dir_sel = (#dev_dirs > 0) and 2 or 1
   end
@@ -418,31 +420,33 @@ end
 
 local function clone_repo()
   if committed or busy or view ~= "dirs" then return end
-  local url = vim.fn.input("git clone: ")
-  if not url or url:gsub("%s", "") == "" then return end
+  status = nil
+  local ok, url = pcall(vim.fn.input, "git clone: ")
+  vim.cmd("redraw")
+  if not ok or not url or url:gsub("%s", "") == "" then return end
+  url = url:gsub("^%s+", ""):gsub("%s+$", "")
+  if url:match("^[%w_.-]+/[%w_.-]+$") then url = "https://github.com/" .. url end
   local name = repo_name_from_url(url)
   if name == "" then
-    busy = "invalid url"
-    render()
+    status = "invalid url"
     return
   end
   local dest = DEV_DIR .. "/" .. name
   if vim.fn.isdirectory(dest) == 1 then
-    busy = name .. " exists"
-    render()
+    status = name .. " exists"
     return
   end
   busy = "cloning " .. name .. "…"
   render()
-  vim.system({ "git", "clone", "--depth", "1", url, dest }, { text = true }, function(res)
+  vim.system({ "git", "clone", url, dest }, { text = true }, function(res)
     vim.schedule(function()
+      busy = nil
       if res.code == 0 then
         scan_dev_dirs()
         select_dir_by_name(name)
-        busy = nil
       else
         local err = (res.stderr or ""):match("[^\r\n]*$")
-        busy = "clone failed" .. (err ~= "" and (": " .. err) or "")
+        status = "clone failed" .. (err ~= "" and (": " .. err) or "")
       end
       render()
     end)
@@ -453,15 +457,32 @@ local function delete_dir()
   if committed or busy or view ~= "dirs" then return end
   local it = dir_items[dir_sel]
   if not it or it.kind ~= "dir" then return end
+  status = nil
   local choice = vim.fn.confirm("Delete " .. it.name .. "?", "&Yes\n&No", 2)
   if choice ~= 1 then return end
-  if vim.fn.delete(DEV_DIR .. "/" .. it.name, "rf") == 0 then
-    scan_dev_dirs()
-    if dir_sel > #dir_items then dir_sel = #dir_items end
-    busy = nil
-  else
-    busy = "delete failed"
+  local dest = DEV_DIR .. "/" .. it.name
+  local is_win = vim.fn.has("win32") == 1
+  -- Windows cannot remove a directory that is the process cwd; step out first
+  local tgt = vim.fs.normalize(dest)
+  local cwd = vim.fs.normalize(vim.fn.getcwd())
+  if is_win then tgt, cwd = tgt:lower(), cwd:lower() end
+  if cwd == tgt or cwd:sub(1, #tgt + 1) == tgt .. "/" then
+    pcall(vim.cmd, "cd " .. vim.fn.fnameescape(DEV_DIR))
   end
+  busy = "deleting " .. it.name .. "…"
+  render()
+  local cmd = is_win
+    and { "cmd", "/d", "/c", "rd", "/s", "/q", (dest:gsub("/", "\\")) }
+    or { "rm", "-rf", dest }
+  vim.system(cmd, { cwd = DEV_DIR }, function()
+    vim.schedule(function()
+      busy = nil
+      if vim.fn.isdirectory(dest) == 1 then status = "delete failed" end
+      scan_dev_dirs()
+      if dir_sel > #dir_items then dir_sel = #dir_items end
+      render()
+    end)
+  end)
 end
 
 function M.show(on_done)
@@ -484,7 +505,7 @@ function M.show(on_done)
   view = "menu"
   sel = 1
   dir_sel = 1
-  busy = nil
+  busy, status = nil, nil
   chosen_dir = nil
   on_done_cb = on_done
   buf = vim.api.nvim_create_buf(false, true)

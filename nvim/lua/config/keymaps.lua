@@ -23,6 +23,8 @@ map('n', '<Esc>', '<cmd>nohlsearch<cr>', { desc = 'Clear highlight' })
 map('n', '<leader>q', '<cmd>q<cr>', { desc = 'Close window' })
 map('n', '<C-s>', '<cmd>write<cr>', { desc = 'Save file' })
 
+map('n', '<leader>cg', function() require('config.catgif').next() end, { desc = 'Next corner gif' })
+
 map('n', '<leader>v', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
 map({ 'n', 'i' }, '<A-v>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
 map({ 'n', 'i' }, '<A-V>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })

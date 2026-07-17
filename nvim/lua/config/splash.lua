@@ -1,21 +1,15 @@
 local M = {}
 
-local ART_H = 13
-local ART_LINES = {
-  "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠭⣯⡻⠿⠿⠿⠻⠿⡿⣿⣿⣿⣿",
-  "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢥⣽⣿⠹⡣⢴⣢⣤⣦⠬⠷⢶⢨",
-  "⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠯⢟⢛⣼⣠⣷⣽⣿⣿⣿⡅⠄⣸⣸",
-  "⡀⠐⠳⠶⣖⣾⠒⢢⠏⢿⣿⡀⣱⣆⢛⣏⣅⣁⣽⡻⢿⣾⡞⢁⣿",
-  "⣧⣤⣤⡹⣩⡀⢀⠙⣵⣴⣿⠗⡉⠡⣬⢻⣿⠢⠄⠦⠄⠄⢀⣼⣿",
-  "⣿⣿⣿⣧⡇⣠⣤⡀⠿⣿⣿⣿⣮⣤⣒⣷⣦⣄⡁⠂⠄⣠⣼⣿⣿",
-  "⣿⣿⣿⣿⣿⣹⠿⠃⠄⠄⠉⠟⠹⢉⡿⠱⣼⣏⠦⠄⢀⣾⣿⣿⣿",
-  "⣿⣿⣿⣿⣿⣿⣷⣶⢦⠄⣀⣤⣀⠈⠁⠂⠁⠄⠄⠠⣼⣿⣿⣿⣿",
-  "⣿⣿⣿⣿⣿⣿⣿⡿⠄⣲⣾⡿⡟⢷⣤⡀⠄⠄⠄⣼⣿⣿⣿⣿⣿",
-  "⣿⣿⣿⣿⣿⣿⣿⠄⣤⣼⣷⣾⡿⢶⣮⣯⡤⠄⠄⣿⣿⣿⠟⠉⣽",
-  "⣿⣿⣿⣿⣿⣿⣟⠠⢤⣫⣺⣻⣟⣛⣦⣦⠤⠄⠄⠿⠿⠁⢀⣰⣿",
-  "⣿⣿⣿⣿⣿⣿⣇⠲⠦⠿⠯⠿⠱⠯⡻⢵⣶⠆⠄⠄⠄⠄⣼⣿⣿",
-  "⣿⣿⣿⣿⣿⣟⢵⢿⡶⢄⣀⣀⣀⣀⣀⡀⢰⣾⡿⡆⢶⣿⣿⣿⣿",
-}
+-- the art is the animated catgif sprite (half-block cells, fg+bg per cell),
+-- shared with the corner cat via config.catgif's sprite() export
+local HALF = "\226\150\128" -- U+2580 upper half block
+local sprite = nil
+local cat_frame = 1
+local cat_timer = nil
+
+local function art_h()
+  return sprite and sprite.h_cells or 0
+end
 
 local PALETTE = { "#8bb8e0", "#a0c8ea", "#b4d6f2", "#c6e0f7", "#d6eafa", "#e4f0fc", "#f0f7fe", "#ffffff" }
 local BG_FALLBACK = "#030509"
@@ -51,12 +45,12 @@ local function split_chars(s)
   return t
 end
 
-local MENU_GAP = 4
+local MENU_GAP = 2
 local MENU_ROW_STEP = 2
-local CONTENT_H = ART_H + MENU_GAP + (#MENU - 1) * MENU_ROW_STEP + 1
 
 local function content_top(rows)
-  return math.max(1, math.floor((rows - CONTENT_H) / 2))
+  local content_h = art_h() + MENU_GAP + (#MENU - 1) * MENU_ROW_STEP + 1
+  return math.max(1, math.floor((rows - content_h) / 2))
 end
 
 local cols, rows = 0, 0
@@ -149,15 +143,16 @@ local function scan_dev_dirs()
 end
 
 local function draw_art()
-  local art_w = 25
+  if not sprite then return end
   local top = content_top(rows)
-  local left = math.floor((cols - art_w) / 2)
-  for li, line in ipairs(ART_LINES) do
-    local r = top + li - 1
+  local left = math.floor((cols - sprite.w_cells) / 2)
+  local grid = sprite.grids[cat_frame] or sprite.grids[1]
+  for gr = 1, sprite.h_cells do
+    local r = top + gr - 1
     if r >= rows then break end
-    local chars = split_chars(line)
-    for ci2, ch in ipairs(chars) do
-      put(left + ci2 - 1, r, ch, 5)
+    local row = grid[gr]
+    for gc = 1, sprite.w_cells do
+      if row[gc] then put(left + gc - 1, r, HALF, row[gc]) end
     end
   end
 end
@@ -166,7 +161,7 @@ local function draw_menu()
   local menu_w = 26
   local left = math.floor((cols - menu_w) / 2)
   local btop = content_top(rows)
-  local mtop = btop + ART_H + MENU_GAP
+  local mtop = btop + art_h() + MENU_GAP
   for i = 1, #MENU do
     local r = mtop + (i - 1) * MENU_ROW_STEP
     if r >= rows then break end
@@ -265,7 +260,8 @@ local function flush()
       local ch = chargrid[idx]
       local ci = colgrid[idx]
       rowchars[c + 1] = ch
-      if ci >= 3 then
+      -- string entries are ready-made highlight group names (the cat's fg+bg cells)
+      if type(ci) == "string" or ci >= 3 then
         if run_ci ~= ci then
           if run_ci then hls[#hls + 1] = { r, run_start, bytepos, run_ci } end
           run_start, run_ci = bytepos, ci
@@ -294,13 +290,27 @@ local function flush()
   end
   for i = 1, #hls do
     local h = hls[i]
-    vim.api.nvim_buf_set_extmark(buf, ns, h[1], h[2], { end_col = h[3], hl_group = "SplashG" .. h[4] })
+    local g = h[4]
+    if type(g) ~= "string" then g = "SplashG" .. g end
+    vim.api.nvim_buf_set_extmark(buf, ns, h[1], h[2], { end_col = h[3], hl_group = g })
   end
 end
+
+local function stop_cat()
+  if cat_timer then
+    pcall(function()
+      cat_timer:stop()
+      cat_timer:close()
+    end)
+    cat_timer = nil
+  end
+end
+
 
 local function finish()
   if done then return end
   done = true
+  stop_cat()
   if win and vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
   if buf and vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
   win, buf = nil, nil
@@ -334,8 +344,27 @@ local function render()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end
 
+local function start_cat()
+  if not sprite or #sprite.grids < 2 then return end
+  stop_cat()
+  cat_timer = vim.uv.new_timer()
+  local function arm()
+    if not cat_timer then return end
+    cat_timer:start(sprite.delays[cat_frame] or 200, 0, function()
+      vim.schedule(function()
+        if done or not cat_timer then return end
+        cat_frame = (cat_frame % #sprite.grids) + 1
+        if view == "menu" then render() end
+        arm()
+      end)
+    end)
+  end
+  arm()
+end
+
 local function quit_nvim()
   done = true
+  stop_cat()
   vim.schedule(function() pcall(vim.cmd, "qa") end)
 end
 
@@ -520,6 +549,11 @@ function M.show(on_done)
     return on_done()
   end
   setup_hl()
+  do
+    local ok, cg = pcall(require, "config.catgif")
+    sprite = ok and cg.sprite() or nil
+    cat_frame = 1
+  end
   scan_dev_dirs()
   done = false
   committed = false
@@ -585,6 +619,7 @@ function M.show(on_done)
   kmap("d", delete_dir)
   kmap("e", open_dev)
   render()
+  start_cat()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end
 

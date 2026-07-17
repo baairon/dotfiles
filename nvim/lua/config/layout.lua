@@ -173,6 +173,14 @@ function M.build_layout()
     end
   end
   vim.defer_fn(settle, 30)
+
+  vim.defer_fn(function()
+    pcall(function()
+      local catgif = require('config.catgif')
+      catgif.setup()
+      catgif.show()
+    end)
+  end, 50)
 end
 
 function M.lazygit_float()

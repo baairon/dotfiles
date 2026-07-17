@@ -29,7 +29,18 @@ return {
       sections = {
         lualine_a = { 'mode' },
         lualine_b = { 'branch', 'diff', 'diagnostics' },
-        lualine_c = { { 'filename', path = 1 } },
+        lualine_c = { {
+          'filename',
+          path = 1,
+          fmt = function(name)
+            -- terminal buffers: the raw term:// URI is path noise; show the shell
+            if vim.bo.buftype == 'terminal' then
+              local exe = name:match('([^/\\:]+)%.exe') or name:match('term://.*[/\\:]([^/\\:%s]+)') or 'terminal'
+              return exe:gsub('%.exe$', '')
+            end
+            return name
+          end,
+        } },
         lualine_x = { 'filetype' },
         lualine_y = { 'progress' },
         lualine_z = { 'location' },

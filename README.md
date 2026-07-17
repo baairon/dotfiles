@@ -1,15 +1,24 @@
 # dotfiles
 
-Personal terminal and editor configuration: a rich multi-panel Neovim workspace
-and a debloated, low-latency Tabby profile.
+> A terminal that boots straight into a working three-pane workspace.
+
+My whole setup lives here: the Neovim workspace, the Tabby profile, and the fonts. Clone it, copy two folders, and any machine feels like home.
+
+## What's inside
+
+- **The Neovim workspace**: open `nvim` and a splash screen greets you: pick a project, clone a new one, or jump back into the last session. From there the layout builds itself: file tree on the left, a shell in the middle, and a live changes rail on the right that counts added and deleted lines per file, untracked files included.
+- **The Tabby profile**: one file holding the whole low-latency setup: GPU acceleration on, ligatures and palette generation off, unused built-in plugins disabled, browser-style tab hotkeys, near-black translucent background.
+- **Fonts**: a small folder of favorites, installable per-user with no elevation.
 
 ## Layout
 
-| Path                | Purpose                                                              |
-|---------------------|---------------------------------------------------------------------|
-| `fonts/`            | Favorite fonts: plain assets, installable on request                 |
+| Path                | Purpose                                                               |
+|---------------------|-----------------------------------------------------------------------|
+| `assets/gifs/`      | Source pixel-art gifs; the bake script turns them into Lua frame data |
+| `fonts/`            | Favorite fonts: plain assets, installable on request                  |
 | `nvim/`             | Neovim config (lazy.nvim; plugin versions pinned in `lazy-lock.json`) |
-| `tabby/config.yaml` | Tabby profile: near-black background, default accents, browser-style tab hotkeys |
+| `scripts/`          | The gif bake script                                                   |
+| `tabby/config.yaml` | The Tabby profile                                                     |
 
 ## Provisioning a fresh machine
 
@@ -34,8 +43,5 @@ that would drift, so editing here is all the next setup needs:
    file's full path as data; skip files already present or in use. On Linux, copy into
    `~/.local/share/fonts` and run `fc-cache -f`. On macOS, copy into `~/Library/Fonts`.
 
-The whole low-latency Tabby profile lives in that one file: GPU acceleration on,
-ligatures and palette generation off, unused built-in plugins disabled,
-browser-style tab hotkeys, the preferred login shell as default, and a shared
-near-black translucent background. The skill applies whatever the file currently
+The Tabby profile applies as-is; the skill reads whatever the file currently
 holds, never a baked-in snapshot.

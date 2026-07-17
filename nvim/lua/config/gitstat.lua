@@ -72,8 +72,9 @@ local function render_bottom()
       icon = icon and (icon .. ' ') or ''
       local adds = (not f.bin and f.a > 0) and ('+' .. f.a) or (f.bin and 'bin' or '')
       local dels = (not f.bin and f.d > 0) and ('-' .. f.d) or ''
+      local tag = f.new and 'new ' or ''
       local sep = (adds ~= '' and dels ~= '') and ' ' or ''
-      local rightw = vim.api.nvim_strwidth(adds) + #sep + vim.api.nvim_strwidth(dels)
+      local rightw = vim.api.nvim_strwidth(tag) + vim.api.nvim_strwidth(adds) + #sep + vim.api.nvim_strwidth(dels)
       local iconw = vim.api.nvim_strwidth(icon)
       local avail = WIDTH - 1 - iconw - rightw - 1
       local dir = (f.pdir ~= '') and (f.pdir .. '/') or ''
@@ -90,6 +91,7 @@ local function render_bottom()
         { text = dir, hl = 'WorkspaceDiffDim' },
         { text = name },
         { text = string.rep(' ', pad) },
+        { text = tag, hl = 'WorkspaceDiffDim' },
         { text = adds, hl = f.bin and 'WorkspaceDiffDim' or 'WorkspaceDiffAdd' },
         { text = sep },
         { text = dels, hl = 'WorkspaceDiffDel' },
@@ -153,27 +155,66 @@ function M.refresh()
   local function run_numstat()
     local root = root_cache[cwd]
     if not root or root == '' then root = cwd end
+
+    local list, changed, ta, td = {}, {}, 0, 0
+
+    local function add_row(path, na, nd, is_new)
+      local name = path:match('[^/]+$') or path
+      local parent = path:sub(1, #path - #name):gsub('/$', ''):match('[^/]+$') or ''
+      list[#list + 1] = { rel = path, pdir = parent, name = name, a = na or 0, d = nd or 0, bin = (na == nil), new = is_new or nil }
+      changed[vim.fs.normalize(root .. '/' .. path)] = true
+      ta, td = ta + (na or 0), td + (nd or 0)
+    end
+
+    local function finalize()
+      table.sort(list, function(x, y) return x.rel < y.rel end)
+      M.files = list
+      M.changed = changed
+      M.totals = { files = #list, a = ta, d = td }
+      render_bottom()
+    end
+
+    -- pass 1: tracked files with unstaged working-tree changes
     vim.system({ 'git', 'diff', '--numstat' }, { cwd = cwd, text = true }, function(res)
       vim.schedule(function()
-        local list, changed, ta, td = {}, {}, 0, 0
         if res.code == 0 and res.stdout and res.stdout ~= '' then
           for line in res.stdout:gmatch('[^\r\n]+') do
             local a, d, path = line:match('^(%S+)\t(%S+)\t(.+)$')
-            if a and path then
-              local na, nd = tonumber(a), tonumber(d)
-              local name = path:match('[^/]+$') or path
-              local parent = path:sub(1, #path - #name):gsub('/$', ''):match('[^/]+$') or ''
-              list[#list + 1] = { rel = path, pdir = parent, name = name, a = na or 0, d = nd or 0, bin = (na == nil) }
-              changed[vim.fs.normalize(root .. '/' .. path)] = true
-              ta, td = ta + (na or 0), td + (nd or 0)
-            end
+            if a and path then add_row(path, tonumber(a), tonumber(d), false) end
           end
         end
-        table.sort(list, function(x, y) return x.rel < y.rel end)
-        M.files = list
-        M.changed = changed
-        M.totals = { files = #list, a = ta, d = td }
-        render_bottom()
+
+        -- pass 2: untracked / brand-new files, counted as all-added lines
+        vim.system({ 'git', 'ls-files', '--others', '--exclude-standard' }, { cwd = cwd, text = true }, function(ures)
+          vim.schedule(function()
+            local others = {}
+            if ures.code == 0 and ures.stdout and ures.stdout ~= '' then
+              for p in ures.stdout:gmatch('[^\r\n]+') do others[#others + 1] = p end
+            end
+            if #others == 0 then return finalize() end
+
+            -- guard: past the cap, list new files without counts rather than spawn unbounded gits
+            local CAP = 200
+            for i = CAP + 1, #others do add_row(others[i], 0, 0, true) end
+
+            local pending = math.min(#others, CAP)
+            for i = 1, pending do
+              local path = others[i]
+              -- diff the file against the empty blob so git counts every line as added (and flags binary)
+              vim.system({ 'git', 'diff', '--no-index', '--numstat', '/dev/null', path }, { cwd = cwd, text = true }, function(dres)
+                vim.schedule(function()
+                  local na = 0
+                  if dres.stdout and dres.stdout ~= '' then
+                    na = tonumber(dres.stdout:match('^(%S+)\t') or '0')  -- nil => binary
+                  end
+                  add_row(path, na, 0, true)
+                  pending = pending - 1
+                  if pending == 0 then finalize() end
+                end)
+              end)
+            end
+          end)
+        end)
       end)
     end)
   end

@@ -45,12 +45,32 @@ local function split_chars(s)
   return t
 end
 
-local MENU_GAP = 2
+-- layout constants: the art sits upper-center (biased above the true middle)
+-- and the menu hangs below it; on short windows the gap compresses toward
+-- MENU_GAP_MIN so every item plus the footer still fits, and below the minima
+-- the splash steps aside entirely
 local MENU_ROW_STEP = 2
+local MENU_W = 23
+local TOP_BIAS = 0.38
+local MENU_GAP_MIN, MENU_GAP_MAX = 2, 3
+local MIN_COLS = 40 -- menu block plus breathing room; the art is narrower
+
+-- largest gap that keeps the last menu row at or above row rows - 3
+local function menu_gap(rows)
+  return math.max(MENU_GAP_MIN, math.min(MENU_GAP_MAX, rows - 10 - art_h()))
+end
+
+-- exact-fit height at MENU_GAP_MIN for the current art
+local function min_rows()
+  return art_h() + 10 + MENU_GAP_MIN
+end
 
 local function content_top(rows)
-  local content_h = art_h() + MENU_GAP + (#MENU - 1) * MENU_ROW_STEP + 1
-  return math.max(1, math.floor((rows - content_h) / 2))
+  local menu_span = menu_gap(rows) + (#MENU - 1) * MENU_ROW_STEP + 1
+  local top = math.floor((rows - art_h()) * TOP_BIAS)
+  local max_top = rows - 2 - art_h() - menu_span
+  if top > max_top then top = max_top end
+  return math.max(1, top)
 end
 
 local cols, rows = 0, 0
@@ -95,7 +115,8 @@ end
 local function setup_hl()
   local BG = get_bg()
   vim.api.nvim_set_hl(0, "SplashBase", { fg = PALETTE[2], bg = BG })
-  vim.api.nvim_set_hl(0, "SplashSel", { bg = "#0e141d" })
+  vim.api.nvim_set_hl(0, "SplashSel", { bg = "#131631" })
+  vim.api.nvim_set_hl(0, "SplashAccent", { fg = "#8f9ae0" })
   for i = 1, 8 do
     vim.api.nvim_set_hl(0, "SplashG" .. i, { fg = PALETTE[i] })
   end
@@ -145,7 +166,8 @@ end
 local function draw_art()
   if not sprite then return end
   local top = content_top(rows)
-  local left = math.floor((cols - sprite.w_cells) / 2)
+  local c1, c2 = sprite.c1, sprite.c2
+  local left = math.floor((cols - (c2 - c1 + 1)) / 2) - (c1 - 1)
   local grid = sprite.grids[cat_frame] or sprite.grids[1]
   for gr = 1, sprite.h_cells do
     local r = top + gr - 1
@@ -158,15 +180,15 @@ local function draw_art()
 end
 
 local function draw_menu()
-  local menu_w = 26
+  local menu_w = MENU_W
   local left = math.floor((cols - menu_w) / 2)
   local btop = content_top(rows)
-  local mtop = btop + art_h() + MENU_GAP
+  local mtop = btop + art_h() + menu_gap(rows)
   for i = 1, #MENU do
     local r = mtop + (i - 1) * MENU_ROW_STEP
     if r >= rows then break end
     local on = (i == sel)
-    if on then put(left, r, IC.marker, 8) end
+    if on then put(left, r, IC.marker, "SplashAccent") end
     put(left + 2, r, MENU[i].icon, on and 8 or 5)
     local lc = split_chars(MENU[i].label)
     local cp = left + 5
@@ -174,7 +196,7 @@ local function draw_menu()
       if lc[j] ~= " " then put(cp, r, lc[j], on and 8 or 5) end
       cp = cp + 1
     end
-    put(left + menu_w - 1, r, MENU[i].key, on and 7 or 3)
+    put(left + menu_w - 1, r, MENU[i].key, on and "SplashAccent" or 3)
   end
 end
 
@@ -182,18 +204,16 @@ local ARROW_UP = "\226\150\178"
 local ARROW_DOWN = "\226\150\188"
 
 local function draw_dirpicker()
-  local menu_w = 26
+  local menu_w = MENU_W
   local left = math.floor((cols - menu_w) / 2)
   local count = #dir_items
-  local avail = rows - 4
-  local max_vis = math.max(1, math.floor((avail - 2) / MENU_ROW_STEP))
+  -- share the menu view's ceiling so switching views never jumps; the list
+  -- may run down to rows - 5 (help line at rows - 3, footer at rows - 1)
+  local title_row = content_top(rows)
+  local list_top = title_row + 2
+  local max_vis = math.max(1, math.floor((rows - 5 - list_top) / MENU_ROW_STEP) + 1)
   max_vis = math.min(max_vis, count)
   local scroll = math.max(0, dir_sel - max_vis)
-  local vis = math.min(max_vis, count - scroll)
-  local block_h = 2 + (vis - 1) * MENU_ROW_STEP + 1
-  local top = math.max(1, math.floor((rows - block_h) / 2))
-  local title_row = top
-  local list_top = top + 2
 
   put_str(left + 2, title_row, "~/dev", 7)
   local msg = busy or status
@@ -213,7 +233,7 @@ local function draw_dirpicker()
     local icon, label, off = it.icon, it.label, it.off
     if on then
       rowbg[r] = { c1 = left, c2 = left + menu_w }
-      put(left, r, IC.marker, 8)
+      put(left, r, IC.marker, "SplashAccent")
     end
     put(left + 2, r, icon, on and 8 or off)
     local nc = split_chars(label)
@@ -545,15 +565,33 @@ function M.show(on_done)
   end
   cols = vim.o.columns
   rows = math.max(1, vim.o.lines - 1)
-  if cols < 40 or rows < 16 then
-    return on_done()
-  end
-  setup_hl()
   do
     local ok, cg = pcall(require, "config.catgif")
     sprite = ok and cg.sprite() or nil
     cat_frame = 1
+    if sprite then
+      -- transparent margins baked into the gif can sit lopsided, so record the
+      -- opaque column bounds and center the visible art rather than the box
+      local c1, c2 = sprite.w_cells, 1
+      for _, grid in ipairs(sprite.grids) do
+        for r = 1, sprite.h_cells do
+          local row = grid[r]
+          for c = 1, sprite.w_cells do
+            if row[c] then
+              if c < c1 then c1 = c end
+              if c > c2 then c2 = c end
+            end
+          end
+        end
+      end
+      if c2 < c1 then c1, c2 = 1, sprite.w_cells end
+      sprite.c1, sprite.c2 = c1, c2
+    end
   end
+  if cols < MIN_COLS or rows < min_rows() then
+    return on_done()
+  end
+  setup_hl()
   scan_dev_dirs()
   done = false
   committed = false

@@ -66,7 +66,9 @@ Every target applies from whatever the files currently hold, never a baked-in sn
   Font build is needed. Vendored from `the-moonwitch/Cozette` release v.1.30.0.
 - `CozetteVectorBold` registers under its own family name rather than as the bold face of
   `CozetteVector`, so nothing pairs them automatically and Tabby synthesizes bold instead.
-  Set `fontWeightBold: 400` to turn that synthesis off.
+  The profile pins `fontWeightBold: 600` and keeps that synthesis. Dropping it to `400` is
+  what turns the synthesis off, by asking for bold text at the one weight the family
+  actually has.
 - `fontSize: 17` is the baked-in equivalent of pressing Ctrl+= twice from 14. Tabby scales
   zoom by `1.1^steps` and never persists it, so pinning the size is the only way to make it
   survive a restart, and it moves what `reset-zoom` (Ctrl+0) returns to.

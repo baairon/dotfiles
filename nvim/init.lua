@@ -17,7 +17,7 @@ vim.opt.rtp:prepend(lazypath)
 
 require('lazy').setup({
   spec = { { import = 'plugins' } },
-  install = { colorscheme = { 'default' } },
+  install = { colorscheme = { 'catppuccin-mocha', 'default' } },
   ui = { border = 'rounded' },
   checker = { enabled = false },
   change_detection = { enabled = false },

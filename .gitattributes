@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Vendored font binaries: never line-ending normalized
+*.ttf binary
+*.otf binary

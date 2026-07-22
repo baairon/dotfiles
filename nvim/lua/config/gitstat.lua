@@ -9,9 +9,10 @@ function M.is_changed(path)
   return path ~= nil and M.changed[vim.fs.normalize(path)] == true
 end
 
+-- both verified present in fonts/CozetteVector.ttf
 local IC = {
-  changes = string.char(0xEF, 0x90, 0x9D),
-  check   = string.char(0xEF, 0x80, 0x8C),
+  changes = string.char(0xEF, 0x84, 0xA6), -- U+F126 code-fork
+  check   = string.char(0xEF, 0x80, 0x8C), -- U+F00C check
 }
 
 local buf, win

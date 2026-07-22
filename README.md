@@ -1,47 +1,74 @@
 # dotfiles
 
-> A terminal that boots straight into a working three-pane workspace.
-
-My whole setup lives here: the Neovim workspace, the Tabby profile, and the fonts. Clone it, copy two folders, and any machine feels like home.
-
-## What's inside
-
-- **The Neovim workspace**: open `nvim` and a splash screen greets you: pick a project, clone a new one, or jump back into the last session. From there the layout builds itself: file tree on the left, a shell in the middle, and a live changes rail on the right that counts added and deleted lines per file, untracked files included.
-- **The Tabby profile**: one file holding the whole low-latency setup: GPU acceleration on, ligatures and palette generation off, unused built-in plugins disabled, browser-style tab hotkeys, near-black translucent background.
-- **Fonts**: a small folder of favorites, installable per-user with no elevation.
+Source of truth for my terminal and editor configuration. The `dotfiles-setup` skill reads
+these files straight from the repo, so editing here is all the next machine needs.
 
 ## Layout
 
-| Path                | Purpose                                                               |
-|---------------------|-----------------------------------------------------------------------|
-| `assets/gifs/`      | Source pixel-art gifs; the bake script turns them into Lua frame data |
-| `fonts/`            | Favorite fonts: plain assets, installable on request                  |
+| Path                | Purpose                                                              |
+|---------------------|----------------------------------------------------------------------|
+| `fonts/`            | Vendored terminal font, installed per-user                            |
 | `nvim/`             | Neovim config (lazy.nvim; plugin versions pinned in `lazy-lock.json`) |
-| `scripts/`          | The gif bake script                                                   |
-| `tabby/config.yaml` | The Tabby profile                                                     |
+| `nvim/lua/config/`  | options, theme, keymaps, layout, splash, gitstat                      |
+| `nvim/lua/plugins/` | One lazy.nvim spec per plugin                                         |
+| `tabby/config.yaml` | The Tabby profile                                                    |
 
-## Provisioning a fresh machine
+## Provisioning
 
-This repo is the single source of truth. My agent sets up a machine by reading these
-files directly through its `dotfiles-setup` skill, rather than keeping its own copies
-that would drift, so editing here is all the next setup needs:
+1. **Neovim**: copy or symlink `nvim/` into the Neovim config directory
+   (`%LOCALAPPDATA%\nvim` on Windows, `~/.config/nvim` elsewhere). First launch bootstraps
+   lazy.nvim and installs the pinned plugins. Needs Neovim 0.10 or later; treesitter parsers
+   compile on demand, which needs the `tree-sitter` CLI (0.26 or later) and a C compiler on
+   PATH. On a Windows machine without MSVC the config points `CC` at gcc. Optional tools:
+   `lazygit` for the git float, `ripgrep` for live grep.
 
-1. **Neovim**: copy `nvim/` into the Neovim config directory (`%LOCALAPPDATA%\nvim`
-   on Windows, `~/.config/nvim` elsewhere). On first launch, `init.lua` bootstraps
-   lazy.nvim and installs the pinned plugins. Treesitter parsers compile on demand,
-   which needs the `tree-sitter` CLI (0.26 or later) and a C compiler on PATH; on a
-   Windows machine without MSVC the config points `CC` at gcc.
-2. **Tabby**: copy `tabby/config.yaml` into Tabby's config directory
-   (`%APPDATA%\tabby` on Windows, `~/.config/tabby` on Linux,
-   `~/Library/Application Support/tabby` on macOS), then fully quit and relaunch Tabby.
-3. **Fonts**: `fonts/` is a plain assets folder first; the files can be referenced or
-   copied like any other asset. Install them only when the setup request asks for
-   fonts, per-user with no elevation. On Windows, copy each file to
-   `%LOCALAPPDATA%\Microsoft\Windows\Fonts` and register it under
-   `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts` as a string value named
-   "full font name (TrueType)" for `.ttf` or "(OpenType)" for `.otf`, with the copied
-   file's full path as data; skip files already present or in use. On Linux, copy into
-   `~/.local/share/fonts` and run `fc-cache -f`. On macOS, copy into `~/Library/Fonts`.
+2. **Fonts**: install `fonts/CozetteVector.ttf` and `fonts/CozetteVectorBold.ttf` per-user,
+   no elevation. Do this before step 3, since the Tabby profile names the font.
 
-The Tabby profile applies as-is; the skill reads whatever the file currently
-holds, never a baked-in snapshot.
+   - **Windows**: copy both files into `%LOCALAPPDATA%\Microsoft\Windows\Fonts`, then add one
+     string value per file under `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts`.
+     The value name is the font's full name plus its format, and the data is the copied
+     file's full path:
+
+     ```
+     CozetteVector (TrueType)      = %LOCALAPPDATA%\Microsoft\Windows\Fonts\CozetteVector.ttf
+     CozetteVectorBold (TrueType)  = %LOCALAPPDATA%\Microsoft\Windows\Fonts\CozetteVectorBold.ttf
+     ```
+
+     Calling `AddFontResourceW` on each path and broadcasting `WM_FONTCHANGE` makes them
+     usable in the current session without a logout.
+   - **Linux**: copy into `~/.local/share/fonts`, then run `fc-cache -f`.
+   - **macOS**: copy into `~/Library/Fonts`.
+
+   Verify with the installed-font list rather than assuming: the two families that must
+   appear are `CozetteVector` and `CozetteVectorBold`.
+
+3. **Tabby**: copy `tabby/config.yaml` into Tabby's config directory (`%APPDATA%\tabby` on
+   Windows, `~/.config/tabby` on Linux, `~/Library/Application Support/tabby` on macOS).
+   Tabby holds its config in memory and rewrites the file on exit, so fully quit it (tray
+   icon included, not just the window) before copying, then relaunch. Writing the file while
+   Tabby runs gets silently clobbered on quit.
+
+   The font is wired under the `terminal:` block, and the repo copy already carries both
+   keys:
+
+   ```yaml
+   terminal:
+     font: CozetteVector
+     fontSize: 17
+   ```
+
+Every target applies from whatever the files currently hold, never a baked-in snapshot.
+
+## Font notes
+
+- Cozette ships Nerd Font icon and Powerline glyphs built in, so no separately patched Nerd
+  Font build is needed. Vendored from `the-moonwitch/Cozette` release v.1.30.0.
+- `CozetteVectorBold` registers under its own family name rather than as the bold face of
+  `CozetteVector`, so nothing pairs them automatically and Tabby synthesizes bold instead.
+  Set `fontWeightBold: 400` to turn that synthesis off.
+- `fontSize: 17` is the baked-in equivalent of pressing Ctrl+= twice from 14. Tabby scales
+  zoom by `1.1^steps` and never persists it, so pinning the size is the only way to make it
+  survive a restart, and it moves what `reset-zoom` (Ctrl+0) returns to.
+- Cozette is a 6x13 bitmap font and these TTFs are the outline conversion, so 13 and 26 are
+  the only sizes that land exactly on its pixel grid. Everything else renders slightly soft.

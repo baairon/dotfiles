@@ -1,30 +1,27 @@
 vim.o.background = 'dark'
-pcall(vim.cmd.colorscheme, 'default')
 
-local BG = '#030509'
+-- catppuccin owns every standard group; this file only paints the workspace's own.
+-- init.lua requires it before lazy runs, so the palette is unavailable on the first
+-- pass and these literals stand in until the ColorScheme event repaints.
+local FALLBACK = {
+  base = '#1e1e2e', text = '#cdd6f4',
+  green = '#a6e3a1', red = '#f38ba8', overlay0 = '#6c7086',
+}
+
+local function palette()
+  local ok, p = pcall(function() return require('catppuccin.palettes').get_palette('mocha') end)
+  return (ok and p) or FALLBACK
+end
 
 local function paint()
+  local P = palette()
   local set = vim.api.nvim_set_hl
-  set(0, 'Normal',          { bg = BG })
-  set(0, 'NormalNC',        { bg = BG })
-  set(0, 'NormalFloat',     { bg = BG })
-  set(0, 'SignColumn',      { bg = BG })
-  set(0, 'LineNr',          { bg = BG })
-  set(0, 'EndOfBuffer',     { bg = BG })
-  set(0, 'WinSeparator',    { fg = '#232640', bg = BG })
-  set(0, 'StatusLine',      { fg = '#d6dbe5', bg = '#0b0f17' })
-  set(0, 'TabLineSel',      { fg = '#ffffff', bg = BG, bold = true })
-  set(0, 'TabLine',         { fg = '#6b7280', bg = BG })
-  set(0, 'TabLineFill',     { bg = BG })
-  set(0, 'NeoTreeNormal',   { bg = BG })
-  set(0, 'NeoTreeNormalNC', { bg = BG })
-  set(0, 'NeoTreeEndOfBuffer', { bg = BG })
-  set(0, 'Cursor',          { fg = BG, bg = '#cfd6e6' })
-  set(0, 'lCursor',         { fg = BG, bg = '#cfd6e6' })
-  set(0, 'TermCursor',      { fg = BG, bg = '#cfd6e6' })
-  set(0, 'WorkspaceDiffAdd', { fg = '#3fb950' })
-  set(0, 'WorkspaceDiffDel', { fg = '#f85149' })
-  set(0, 'WorkspaceDiffDim', { fg = '#6b7280' })
+  set(0, 'WorkspaceDiffAdd', { fg = P.green })
+  set(0, 'WorkspaceDiffDel', { fg = P.red })
+  set(0, 'WorkspaceDiffDim', { fg = P.overlay0 })
+  set(0, 'Cursor',     { fg = P.base, bg = P.text })
+  set(0, 'lCursor',    { fg = P.base, bg = P.text })
+  set(0, 'TermCursor', { fg = P.base, bg = P.text })
 end
 
 paint()

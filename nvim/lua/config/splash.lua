@@ -1,32 +1,29 @@
 local M = {}
 
--- the art is the animated catgif sprite (half-block cells, fg+bg per cell),
--- shared with the corner cat via config.catgif's sprite() export
-local HALF = "\226\150\128" -- U+2580 upper half block
-local sprite = nil
-local cat_frame = 1
-local cat_timer = nil
+-- boot picker: a static menu over a full-window scratch buffer; only the rows it
+-- actually draws get built, then flush as lines plus highlight extmarks
 
-local function art_h()
-  return sprite and sprite.h_cells or 0
+-- mocha tones, with literals standing in if catppuccin is somehow absent
+local FALLBACK = {
+  overlay0 = "#6c7086", subtext0 = "#a6adc8", subtext1 = "#bac2de",
+  text = "#cdd6f4", lavender = "#b4befe", peach = "#fab387",
+}
+
+local function palette()
+  local ok, p = pcall(function() return require("catppuccin.palettes").get_palette("mocha") end)
+  return (ok and p) or FALLBACK
 end
 
-local PALETTE = { "#8bb8e0", "#a0c8ea", "#b4d6f2", "#c6e0f7", "#d6eafa", "#e4f0fc", "#f0f7fe", "#ffffff" }
-local BG_FALLBACK = "#030509"
-local function get_bg()
-  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = "Normal" })
-  if ok and hl and hl.bg then return string.format("#%06x", hl.bg) end
-  return BG_FALLBACK
-end
-
+-- every glyph is verified present in fonts/CozetteVector.ttf; Cozette carries only
+-- 503 of Nerd Font's private-use glyphs, so a swap here needs checking, not guessing
 local IC = {
-  play    = string.char(0xEF, 0x81, 0x8B),
-  history = string.char(0xEF, 0x87, 0x9A),
-  folder  = string.char(0xEF, 0x81, 0xBC),
-  power   = string.char(0xEF, 0x80, 0x91),
-  dir     = string.char(0xEF, 0x81, 0xBB),
-  back    = string.char(0xEF, 0x81, 0xA0),
-  marker  = string.char(0xE2, 0x9D, 0xAF),
+  play    = string.char(0xEF, 0x81, 0x8B), -- U+F04B play
+  history = string.char(0xEF, 0x80, 0x97), -- U+F017 clock
+  folder  = string.char(0xEF, 0x81, 0xBC), -- U+F07C folder-open
+  power   = string.char(0xEF, 0x80, 0x8D), -- U+F00D times
+  dir     = string.char(0xEF, 0x81, 0xBB), -- U+F07B folder
+  back    = string.char(0xEF, 0x81, 0x93), -- U+F053 chevron-left
+  marker  = string.char(0xE2, 0x9D, 0xAF), -- U+276F heavy right angle quote
 }
 
 local MENU = {
@@ -39,43 +36,32 @@ local MENU = {
 local STATE_FILE = vim.fn.stdpath("data") .. "/splash_last_dir"
 local DEV_DIR = vim.fn.expand(vim.env.NVIM_DEV_DIR or "~/dev")
 
-local function split_chars(s)
-  local t = {}
-  for c in s:gmatch("[\1-\127\194-\244][\128-\191]*") do t[#t + 1] = c end
-  return t
-end
-
--- layout constants: the art sits upper-center (biased above the true middle)
--- and the menu hangs below it; on short windows the gap compresses toward
--- MENU_GAP_MIN so every item plus the footer still fits, and below the minima
--- the splash steps aside entirely
+-- layout constants: each view centers its own block; under the minima the splash
+-- steps aside entirely
 local MENU_ROW_STEP = 2
 local MENU_W = 23
-local TOP_BIAS = 0.38
-local MENU_GAP_MIN, MENU_GAP_MAX = 2, 3
-local MIN_COLS = 40 -- menu block plus breathing room; the art is narrower
-
--- largest gap that keeps the last menu row at or above row rows - 3
-local function menu_gap(rows)
-  return math.max(MENU_GAP_MIN, math.min(MENU_GAP_MAX, rows - 10 - art_h()))
-end
-
--- exact-fit height at MENU_GAP_MIN for the current art
-local function min_rows()
-  return art_h() + 10 + MENU_GAP_MIN
-end
+local MIN_COLS = 40 -- menu block plus breathing room
+local MENU_SPAN = (#MENU - 1) * MENU_ROW_STEP + 1
+local MIN_ROWS = MENU_SPAN + 3 -- menu block plus the footer row
+local DIRS_CHROME = 4 -- the picker's help line at rows - 3, footer at rows - 1
 
 local function content_top(rows)
-  local menu_span = menu_gap(rows) + (#MENU - 1) * MENU_ROW_STEP + 1
-  local top = math.floor((rows - art_h()) * TOP_BIAS)
-  local max_top = rows - 2 - art_h() - menu_span
+  local top = math.floor((rows - MENU_SPAN) / 2)
+  local max_top = rows - 2 - MENU_SPAN
   if top > max_top then top = max_top end
   return math.max(1, top)
 end
 
+-- the picker centers its own height (title, blank, then the visible list) rather
+-- than the menu's, and resolves max-visible against the same band in one pass
+local function dirs_layout(rows, count)
+  local band = rows - DIRS_CHROME
+  local max_vis = math.min(count, math.max(1, math.floor((band - 3) / MENU_ROW_STEP) + 1))
+  local block = 3 + (max_vis - 1) * MENU_ROW_STEP
+  return math.max(1, math.floor((band - block) / 2)), max_vis
+end
+
 local cols, rows = 0, 0
-local chargrid, colgrid = {}, {}
-local rowbg = {}
 local win, buf, ns
 local on_done_cb, done = nil, false
 local sel = 1
@@ -88,38 +74,50 @@ local committed = false
 local busy = nil
 local status = nil
 
-local function clear()
-  for i = 1, rows * cols do chargrid[i] = " "; colgrid[i] = 0 end
-  for k in pairs(rowbg) do rowbg[k] = nil end
+-- one output row, built left to right: `cells` tracks display columns for
+-- positioning, `bytes` tracks byte offsets because that is what extmarks want
+local Row = {}
+Row.__index = Row
+
+local function row_new()
+  return setmetatable({ cells = 0, bytes = 0, buf = {}, spans = {} }, Row)
 end
 
-local function put(c, r, ch, ci)
-  if c < 0 or c >= cols or r < 0 or r >= rows then return end
-  local idx = r * cols + c + 1
-  chargrid[idx] = ch
-  colgrid[idx] = ci
-end
-
-local function put_str(left, r, s, ci)
-  local cs = split_chars(s)
-  for i, ch in ipairs(cs) do
-    if ch ~= " " then put(left + i - 1, r, ch, ci) end
+function Row:at(col, text, hl)
+  if col < self.cells then return self end -- never overlap what is already placed
+  local pad = col - self.cells
+  if pad > 0 then
+    self.buf[#self.buf + 1] = string.rep(" ", pad)
+    self.bytes = self.bytes + pad
   end
+  local start = self.bytes
+  self.buf[#self.buf + 1] = text
+  self.bytes = self.bytes + #text
+  self.cells = col + vim.api.nvim_strwidth(text)
+  if hl and #text > 0 then self.spans[#self.spans + 1] = { start, self.bytes, hl } end
+  return self
 end
 
-local function put_center(r, s, ci)
-  local cs = split_chars(s)
-  put_str(math.max(0, math.floor((cols - #cs) / 2)), r, s, ci)
+-- span from a recorded byte offset to wherever the row now ends
+function Row:mark(from, hl, prio)
+  self.spans[#self.spans + 1] = { from, self.bytes, hl, prio }
 end
+
+function Row:line() return table.concat(self.buf) end
 
 local function setup_hl()
-  local BG = get_bg()
-  vim.api.nvim_set_hl(0, "SplashBase", { fg = PALETTE[2], bg = BG })
-  vim.api.nvim_set_hl(0, "SplashSel", { bg = "#131631" })
-  vim.api.nvim_set_hl(0, "SplashAccent", { fg = "#8f9ae0" })
-  for i = 1, 8 do
-    vim.api.nvim_set_hl(0, "SplashG" .. i, { fg = PALETTE[i] })
-  end
+  local P = palette()
+  local set = vim.api.nvim_set_hl
+  -- no bg: the splash inherits the transparent base like every other window
+  set(0, "SplashBase",  { fg = P.subtext0 })
+  set(0, "SplashDim",   { fg = P.overlay0 })
+  set(0, "SplashItem",  { fg = P.subtext1 })
+  set(0, "SplashMsg",   { fg = P.peach })
+  set(0, "SplashTitle", { fg = P.lavender })
+  set(0, "SplashOn",    { fg = P.text })
+  -- accent and selection inherit the active colorscheme rather than hardcoding
+  set(0, "SplashAccent", { link = "Directory" })
+  set(0, "SplashSel",    { link = "CursorLine" })
 end
 
 local function save_last_dir()
@@ -142,10 +140,10 @@ end
 
 local function build_dir_items()
   dir_items = {
-    { kind = "back", icon = IC.back, label = "Back", off = 3 },
+    { kind = "back", icon = IC.back, label = "Back", hl = "SplashDim" },
   }
   for _, name in ipairs(dev_dirs) do
-    dir_items[#dir_items + 1] = { kind = "dir", icon = IC.dir, label = name, off = 5, name = name }
+    dir_items[#dir_items + 1] = { kind = "dir", icon = IC.dir, label = name, hl = "SplashItem", name = name }
   end
 end
 
@@ -163,174 +161,88 @@ local function scan_dev_dirs()
   build_dir_items()
 end
 
-local function draw_art()
-  if not sprite then return end
-  local top = content_top(rows)
-  local c1, c2 = sprite.c1, sprite.c2
-  local left = math.floor((cols - (c2 - c1 + 1)) / 2) - (c1 - 1)
-  local grid = sprite.grids[cat_frame] or sprite.grids[1]
-  for gr = 1, sprite.h_cells do
-    local r = top + gr - 1
-    if r >= rows then break end
-    local row = grid[gr]
-    for gc = 1, sprite.w_cells do
-      if row[gc] then put(left + gc - 1, r, HALF, row[gc]) end
-    end
+-- both views place the same shape: marker, icon, label. the label is clipped to
+-- the block so a long ~/dev name cannot drag the selection background past it
+local LABEL_W = MENU_W - 5
+
+local function draw_entry(row, left, icon, label, hl, selected)
+  if selected then row:at(left, IC.marker, "SplashAccent") end
+  row:at(left + 2, icon, hl)
+  if vim.fn.strchars(label) > LABEL_W then
+    label = vim.fn.strcharpart(label, 0, LABEL_W - 1) .. "…"
   end
+  row:at(left + 5, label, hl)
 end
 
-local function draw_menu()
-  local menu_w = MENU_W
-  local left = math.floor((cols - menu_w) / 2)
-  local btop = content_top(rows)
-  local mtop = btop + art_h() + menu_gap(rows)
+local function draw_menu(row)
+  local left = math.floor((cols - MENU_W) / 2)
+  local top = content_top(rows)
   for i = 1, #MENU do
-    local r = mtop + (i - 1) * MENU_ROW_STEP
-    if r >= rows then break end
     local on = (i == sel)
-    if on then put(left, r, IC.marker, "SplashAccent") end
-    put(left + 2, r, MENU[i].icon, on and 8 or 5)
-    local lc = split_chars(MENU[i].label)
-    local cp = left + 5
-    for j = 1, #lc do
-      if lc[j] ~= " " then put(cp, r, lc[j], on and 8 or 5) end
-      cp = cp + 1
-    end
-    put(left + menu_w - 1, r, MENU[i].key, on and "SplashAccent" or 3)
+    local r = row(top + (i - 1) * MENU_ROW_STEP)
+    draw_entry(r, left, MENU[i].icon, MENU[i].label, on and "SplashOn" or "SplashItem", on)
+    r:at(left + MENU_W - 1, MENU[i].key, on and "SplashAccent" or "SplashDim")
   end
 end
 
 local ARROW_UP = "\226\150\178"
 local ARROW_DOWN = "\226\150\188"
 
-local function draw_dirpicker()
-  local menu_w = MENU_W
-  local left = math.floor((cols - menu_w) / 2)
+local HELP = "↵ open   e dev   c clone   d delete   esc back"
+
+local function draw_dirpicker(row)
+  local left = math.floor((cols - MENU_W) / 2)
   local count = #dir_items
-  -- share the menu view's ceiling so switching views never jumps; the list
-  -- may run down to rows - 5 (help line at rows - 3, footer at rows - 1)
-  local title_row = content_top(rows)
+  local title_row, max_vis = dirs_layout(rows, count)
   local list_top = title_row + 2
-  local max_vis = math.max(1, math.floor((rows - 5 - list_top) / MENU_ROW_STEP) + 1)
-  max_vis = math.min(max_vis, count)
   local scroll = math.max(0, dir_sel - max_vis)
 
-  put_str(left + 2, title_row, "~/dev", 7)
+  local title = row(title_row):at(left + 2, "~/dev", "SplashTitle")
   local msg = busy or status
-  if msg then put_str(left + 8, title_row, msg, 6) end
+  if msg then title:at(left + 8, msg, "SplashMsg") end
 
-  if scroll > 0 then put(left + math.floor(menu_w / 2), list_top - 1, ARROW_UP, 3) end
+  if scroll > 0 then
+    row(list_top - 1):at(left + math.floor(MENU_W / 2), ARROW_UP, "SplashDim")
+  end
 
   local last_r = list_top
   for i = 1, max_vis do
     local di = i + scroll
     if di > count then break end
-    local r = list_top + (i - 1) * MENU_ROW_STEP
-    if r >= rows - 1 then break end
-    last_r = r
-    local on = (di == dir_sel)
+    last_r = list_top + (i - 1) * MENU_ROW_STEP
     local it = dir_items[di]
-    local icon, label, off = it.icon, it.label, it.off
-    if on then
-      rowbg[r] = { c1 = left, c2 = left + menu_w }
-      put(left, r, IC.marker, "SplashAccent")
-    end
-    put(left + 2, r, icon, on and 8 or off)
-    local nc = split_chars(label)
-    local cp = left + 5
-    for j = 1, #nc do
-      if nc[j] ~= " " then put(cp, r, nc[j], on and 8 or off) end
-      cp = cp + 1
+    local r = row(last_r)
+    if di == dir_sel then
+      local bg = r:at(left, "").bytes
+      draw_entry(r, left, it.icon, it.label, "SplashOn", true)
+      r:at(left + MENU_W, "")
+      r:mark(bg, "SplashSel", 1)
+    else
+      draw_entry(r, left, it.icon, it.label, it.hl, false)
     end
   end
 
   if scroll + max_vis < count then
-    put(left + math.floor(menu_w / 2), last_r + 1, ARROW_DOWN, 3)
+    row(last_r + 1):at(left + math.floor(MENU_W / 2), ARROW_DOWN, "SplashDim")
   end
 
-  put_center(rows - 3, "↵ open   e dev   c clone   d delete   esc back", 3)
+  local hw = vim.api.nvim_strwidth(HELP)
+  row(rows - 3):at(math.max(0, math.floor((cols - hw) / 2)), HELP, "SplashDim")
 end
 
-local function draw_footer()
-  local cwd = split_chars(vim.fn.fnamemodify(vim.fn.getcwd(), ":~"))
-  local maxw = cols - 6
-  if maxw > 1 and #cwd > maxw then
-    local trimmed = { "…" }
-    for i = #cwd - maxw + 2, #cwd do trimmed[#trimmed + 1] = cwd[i] end
-    cwd = trimmed
+local function draw_footer(row)
+  local cwd = vim.fn.fnamemodify(vim.fn.getcwd(), ":~")
+  local maxw, w = cols - 6, vim.fn.strchars(cwd)
+  if maxw > 1 and w > maxw then
+    cwd = "…" .. vim.fn.strcharpart(cwd, w - maxw + 1)
   end
-  local r = rows - 1
-  local left = math.max(0, math.floor((cols - (2 + #cwd)) / 2))
-  put(left, r, IC.dir, 3)
-  for i, ch in ipairs(cwd) do
-    if ch ~= " " then put(left + 2 + i - 1, r, ch, 3) end
-  end
+  local left = math.max(0, math.floor((cols - (2 + vim.api.nvim_strwidth(cwd))) / 2))
+  row(rows - 1):at(left, IC.dir, "SplashDim"):at(left + 2, cwd, "SplashDim")
 end
-
-local function flush()
-  local lines, hls, bgmarks = {}, {}, {}
-  for r = 0, rows - 1 do
-    local rowchars, bytepos = {}, 0
-    local run_start, run_ci = 0, nil
-    local b = r * cols
-    local bg = rowbg[r]
-    local bg_s, bg_e = nil, nil
-    for c = 0, cols - 1 do
-      local idx = b + c + 1
-      local ch = chargrid[idx]
-      local ci = colgrid[idx]
-      rowchars[c + 1] = ch
-      -- string entries are ready-made highlight group names (the cat's fg+bg cells)
-      if type(ci) == "string" or ci >= 3 then
-        if run_ci ~= ci then
-          if run_ci then hls[#hls + 1] = { r, run_start, bytepos, run_ci } end
-          run_start, run_ci = bytepos, ci
-        end
-      elseif run_ci then
-        hls[#hls + 1] = { r, run_start, bytepos, run_ci }
-        run_ci = nil
-      end
-      if bg then
-        if c == bg.c1 then bg_s = bytepos end
-        if c == bg.c2 then bg_e = bytepos end
-      end
-      bytepos = bytepos + #ch
-    end
-    if run_ci then hls[#hls + 1] = { r, run_start, bytepos, run_ci } end
-    if bg and bg_s then bgmarks[#bgmarks + 1] = { r, bg_s, bg_e or bytepos } end
-    lines[r + 1] = table.concat(rowchars)
-  end
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for i = 1, #bgmarks do
-    local m = bgmarks[i]
-    vim.api.nvim_buf_set_extmark(buf, ns, m[1], m[2], { end_col = m[3], hl_group = "SplashSel", priority = 1 })
-  end
-  for i = 1, #hls do
-    local h = hls[i]
-    local g = h[4]
-    if type(g) ~= "string" then g = "SplashG" .. g end
-    vim.api.nvim_buf_set_extmark(buf, ns, h[1], h[2], { end_col = h[3], hl_group = g })
-  end
-end
-
-local function stop_cat()
-  if cat_timer then
-    pcall(function()
-      cat_timer:stop()
-      cat_timer:close()
-    end)
-    cat_timer = nil
-  end
-end
-
 
 local function finish()
   if done then return end
   done = true
-  stop_cat()
   if win and vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
   if buf and vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
   win, buf = nil, nil
@@ -350,41 +262,43 @@ local function render()
     return
   end
   local ok = pcall(function()
-    clear()
-    if view == "menu" then
-      draw_art()
-      draw_menu()
-    else
-      draw_dirpicker()
+    local out = {}
+    -- rows are sparse; anything off-screen lands in a throwaway and is dropped
+    local function row(r)
+      if r < 0 or r >= rows then return row_new() end
+      out[r] = out[r] or row_new()
+      return out[r]
     end
-    draw_footer()
-    flush()
+
+    if view == "menu" then draw_menu(row) else draw_dirpicker(row) end
+    draw_footer(row)
+
+    local lines, marks = {}, {}
+    for r = 0, rows - 1 do
+      local rw = out[r]
+      lines[r + 1] = rw and rw:line() or ""
+      if rw then
+        for _, s in ipairs(rw.spans) do marks[#marks + 1] = { r, s } end
+      end
+    end
+
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+    vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+    for _, m in ipairs(marks) do
+      local s = m[2]
+      vim.api.nvim_buf_set_extmark(buf, ns, m[1], s[1], {
+        end_col = s[2], hl_group = s[3], priority = s[4],
+      })
+    end
   end)
   if not ok then finish() end
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end
 
-local function start_cat()
-  if not sprite or #sprite.grids < 2 then return end
-  stop_cat()
-  cat_timer = vim.uv.new_timer()
-  local function arm()
-    if not cat_timer then return end
-    cat_timer:start(sprite.delays[cat_frame] or 200, 0, function()
-      vim.schedule(function()
-        if done or not cat_timer then return end
-        cat_frame = (cat_frame % #sprite.grids) + 1
-        if view == "menu" then render() end
-        arm()
-      end)
-    end)
-  end
-  arm()
-end
-
 local function quit_nvim()
   done = true
-  stop_cat()
   vim.schedule(function() pcall(vim.cmd, "qa") end)
 end
 
@@ -565,30 +479,7 @@ function M.show(on_done)
   end
   cols = vim.o.columns
   rows = math.max(1, vim.o.lines - 1)
-  do
-    local ok, cg = pcall(require, "config.catgif")
-    sprite = ok and cg.sprite() or nil
-    cat_frame = 1
-    if sprite then
-      -- transparent margins baked into the gif can sit lopsided, so record the
-      -- opaque column bounds and center the visible art rather than the box
-      local c1, c2 = sprite.w_cells, 1
-      for _, grid in ipairs(sprite.grids) do
-        for r = 1, sprite.h_cells do
-          local row = grid[r]
-          for c = 1, sprite.w_cells do
-            if row[c] then
-              if c < c1 then c1 = c end
-              if c > c2 then c2 = c end
-            end
-          end
-        end
-      end
-      if c2 < c1 then c1, c2 = 1, sprite.w_cells end
-      sprite.c1, sprite.c2 = c1, c2
-    end
-  end
-  if cols < MIN_COLS or rows < min_rows() then
+  if cols < MIN_COLS or rows < MIN_ROWS then
     return on_done()
   end
   setup_hl()
@@ -657,7 +548,6 @@ function M.show(on_done)
   kmap("d", delete_dir)
   kmap("e", open_dev)
   render()
-  start_cat()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end
 

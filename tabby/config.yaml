@@ -207,9 +207,9 @@ terminal:
   fontWeightBold: 600
   paletteGenerate: false
   paletteHarmonious: false
-  fontSize: 14
+  fontSize: 17
   cursor: block
-  font: Hack Nerd Font
+  font: CozetteVector
 ssh: {}
 clickableLinks: {}
 accessibility:

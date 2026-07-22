@@ -2,8 +2,6 @@ local M = {}
 
 local quitting = false
 
-local AUTO_BOOT = true
-
 local function git_bash()
   local candidates = {}
   local function add(p) if p and p ~= '' then candidates[#candidates + 1] = p end end
@@ -65,8 +63,8 @@ local function build_winbar(win)
         local basename = vim.fn.fnamemodify(n, ':t')
         local ext = vim.fn.fnamemodify(n, ':e')
         local icon = ''
-        local ok, devicons = pcall(require, 'nvim-web-devicons')
-        if ok then
+        local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+        if has_devicons then
           local ic = devicons.get_icon(basename, ext, { default = true })
           if ic then icon = ic .. ' ' end
         end
@@ -173,14 +171,6 @@ function M.build_layout()
     end
   end
   vim.defer_fn(settle, 30)
-
-  vim.defer_fn(function()
-    pcall(function()
-      local catgif = require('config.catgif')
-      catgif.setup()
-      catgif.show()
-    end)
-  end, 50)
 end
 
 function M.lazygit_float()
@@ -414,27 +404,24 @@ vim.api.nvim_create_autocmd('TermClose', {
 
 pcall(function() require('config.gitstat').setup() end)
 
-if AUTO_BOOT then
-  vim.api.nvim_create_autocmd('VimEnter', {
-    once = true,
-    callback = function()
-      if #vim.api.nvim_list_uis() == 0 then return end
-      local a = vim.fn.argv()
-      local boot = (#a == 0) or (#a == 1 and vim.fn.isdirectory(a[1]) == 1)
-      if boot then
-        vim.schedule(function()
-          local ok, splash = pcall(require, 'config.splash')
-          if ok and splash and splash.show then
-            splash.show(function(launched)
-              if launched then M.build_layout() end
-            end)
-          else
-            M.build_layout()
-          end
+-- boot into the splash on a bare `nvim` or `nvim <dir>`, never with file args
+vim.api.nvim_create_autocmd('VimEnter', {
+  once = true,
+  callback = function()
+    if #vim.api.nvim_list_uis() == 0 then return end
+    local a = vim.fn.argv()
+    if #a > 1 or (#a == 1 and vim.fn.isdirectory(a[1]) == 0) then return end
+    vim.schedule(function()
+      local ok, splash = pcall(require, 'config.splash')
+      if ok and splash and splash.show then
+        splash.show(function(launched)
+          if launched then M.build_layout() end
         end)
+      else
+        M.build_layout()
       end
-    end,
-  })
-end
+    end)
+  end,
+})
 
 return M

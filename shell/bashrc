@@ -1,0 +1,115 @@
+
+# Shell configuration, deployed from the dotfiles repo. Environment first, then everything
+# that only means something at a prompt.
+#
+# Machine-specific additions belong in ~/.bashrc.local, which is sourced at the very end
+# and is never tracked. Nothing in this file is allowed to name a specific machine: it has
+# to be correct on a box where none of these directories exist yet.
+
+# Everything above the interactive guard applies to EVERY shell that reads this file, and a
+# login shell that is not interactive is one of them: bash sources ~/.bashrc through
+# ~/.bash_profile whether or not there is a terminal attached. Environment belongs up here
+# for exactly that reason. Put the PATH additions below the guard and a `bash -lc` loses
+# them, which is how scripts, editors and agent tooling end up with a different PATH than
+# the terminal has.
+
+# --- environment -----------------------------------------------------------------------
+export EDITOR=nvim
+export VISUAL=nvim
+
+# -R keeps colour, -F skips the pager for output that already fits, -X leaves that output
+# on the screen instead of wiping it with the alternate screen buffer.
+export LESS='-R -F -X'
+export LESSHISTFILE=-
+
+# --- PATH ------------------------------------------------------------------------------
+# Every entry is guarded twice: the directory has to exist, and it must not already be on
+# PATH, so re-sourcing this file cannot grow PATH without bound. Paths are built from
+# $HOME rather than a literal profile path, which is exactly what the previous one-line
+# .bashrc got wrong: it hardcoded one machine's user directory.
+for _d in "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/.bun/bin" "$HOME/.foundry/bin"; do
+  if [ -d "$_d" ]; then
+    case ":$PATH:" in
+      *":$_d:"*) ;;
+              *) PATH="$PATH:$_d" ;;
+    esac
+  fi
+done
+unset _d
+export PATH
+
+# --- interactive only ------------------------------------------------------------------
+# Non-interactive shells (scp, rsync, anything reading stdout) must return before the
+# first line of output, or they break in ways that are miserable to debug. Nothing below
+# this point means anything without a prompt.
+case $- in
+  *i*) ;;
+    *) return ;;
+esac
+
+# --- history ---------------------------------------------------------------------------
+# History is a search index, not a scratchpad, so it is kept large and deduplicated.
+# `histappend` is the one that matters with several terminals open: without it the last
+# shell to exit overwrites the file and every other session's history is gone.
+HISTSIZE=100000
+HISTFILESIZE=200000
+HISTCONTROL=ignoreboth:erasedups
+HISTIGNORE='ls:ll:la:cd:pwd:exit:clear:history'
+HISTTIMEFORMAT='%F %T  '
+shopt -s histappend
+shopt -s cmdhist
+
+# --- shell behaviour -------------------------------------------------------------------
+shopt -s checkwinsize          # re-read the terminal size after every command
+shopt -s cdspell               # forgive small typos in a cd path
+shopt -s no_empty_cmd_completion
+
+# globstar, autocd and dirspell arrived in bash 4.0. macOS still ships 3.2 as /bin/bash,
+# where each of these is an `invalid shell option name` error printed at every login rather
+# than anything fatal. Gate them instead of making a working shell look broken.
+if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+  shopt -s globstar            # ** recurses into subdirectories
+  shopt -s autocd              # a bare directory path is a cd
+  shopt -s dirspell            # forgive small typos while completing a directory
+fi
+
+# --- aliases ---------------------------------------------------------------------------
+# ls carries Git for Windows' own flags: --show-control-chars is what keeps accented and
+# CJK filenames readable under mintty.
+alias ls='ls -F --color=auto --show-control-chars'
+alias ll='ls -lh'
+alias la='ls -lhA'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias grep='grep --color=auto'
+
+alias v=nvim
+alias lg=lazygit
+alias g=git
+alias gs='git status --short --branch'
+alias gd='git diff'
+alias gl='git log --oneline --graph --decorate -20'
+
+# --- prompt ----------------------------------------------------------------------------
+# On Git for Windows /etc/profile.d/git-prompt.sh already handed over to
+# ~/.config/git/git-prompt.sh before this file ran, and that sets __DOTFILES_PROMPT.
+# Anywhere else nothing sources it, so do it here and keep one prompt definition.
+if [ -z "$__DOTFILES_PROMPT" ] && [ -f "$HOME/.config/git/git-prompt.sh" ]; then
+  . "$HOME/.config/git/git-prompt.sh"
+fi
+
+# --- completion ------------------------------------------------------------------------
+# Git for Windows sources git's completion itself; this is for every other box. The symbol
+# to test is __git_main: current git-completion.bash defines that and registers a generated
+# __git_wrap__git_main wrapper, and never defines a plain _git, so testing _git would look
+# like "no completion loaded" on a machine that has it.
+if ! declare -F __git_main >/dev/null 2>&1; then
+  for _c in /usr/share/bash-completion/bash_completion /etc/bash_completion; do
+    [ -r "$_c" ] && { . "$_c"; break; }
+  done
+  unset _c
+fi
+
+# --- machine-local ---------------------------------------------------------------------
+# Last, so a machine can override anything above without editing a tracked file.
+[ -f "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"

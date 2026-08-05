@@ -1,21 +1,54 @@
 # dotfiles
 
-Source of truth for my machine: terminal, editor, and the setup around them. The
-`dotfiles-setup` skill reads these files straight from the repo, so editing here is all the
-next machine needs.
+Source of truth for my machine: terminal, editor, shell, and the setup around them. The repo
+carries its own installer, so a clone provisions a machine on its own, and the
+`dotfiles-setup` skill is the remote path into the same code rather than a second copy of it.
+Either way the files here are what gets deployed, so editing this repo is all the next
+machine needs.
 
 ## Layout
 
 | Path                | Purpose                                                              |
 |---------------------|----------------------------------------------------------------------|
+| `install.mjs`       | The installer. Deploys every folder below                            |
 | `fonts/`            | Vendored terminal font, installed per-user                            |
 | `nvim/`             | Neovim config (lazy.nvim; plugin versions pinned in `lazy-lock.json`) |
 | `nvim/lua/config/`  | options, theme, keymaps, layout, splash, gitstat                      |
 | `nvim/lua/plugins/` | One lazy.nvim spec per plugin                                         |
 | `tabby/config.yaml` | The Tabby profile                                                    |
+| `shell/`            | bash, readline, and git                                              |
 | `machine/`          | The machine itself: software, login startup, user folders, privacy   |
 
 ## Provisioning
+
+One command, from a fresh clone:
+
+```bash
+git clone https://github.com/baairon/dotfiles
+cd dotfiles
+node install.mjs              # font, terminal, editor, shell
+node install.mjs --machine    # ...and the machine layer
+```
+
+`install.mjs` deploys the checkout it is sitting in, so no flags are needed. It runs on Node
+with builtins only, no dependencies to install first. Useful before committing to it:
+
+```bash
+node install.mjs --dry-run    # report every write, perform none
+node install.mjs --list       # what is already present on this machine
+node install.mjs --selftest   # the installer's own checks
+```
+
+Every target is backed up to a timestamped `.bak-...` before it is replaced, and files that
+already match are left alone, so a second run is a no-op rather than a pile of backups. The
+machine layer is off by default: the steps above write config files, while that one writes
+the registry and repoints user folders.
+
+Individual layers can be skipped with `--no-fonts`, `--no-tabby`, `--no-nvim`, `--no-shell`.
+
+### By hand
+
+What the installer does, for a machine where running it is not wanted:
 
 1. **Neovim**: copy or symlink `nvim/` into the Neovim config directory
    (`%LOCALAPPDATA%\nvim` on Windows, `~/.config/nvim` elsewhere). First launch bootstraps
@@ -60,7 +93,14 @@ next machine needs.
      fontSize: 19
    ```
 
-4. **Machine**: apply `machine/machine.json`, which declares the software that belongs on the
+4. **Shell**: copy the files in `shell/` to their homes: `bashrc`, `bash_profile`, `inputrc`,
+   `gitconfig` and `gitignore_global` to `~/.bashrc`, `~/.bash_profile`, `~/.inputrc`,
+   `~/.gitconfig` and `~/.gitignore_global`, and `git-prompt.sh` to `~/.config/git/git-prompt.sh`,
+   which is the path Git for Windows looks for before building its own prompt. Machine-specific
+   settings go in `~/.bashrc.local` and `~/.gitconfig.local`, which are sourced last and are
+   never tracked, so a redeploy cannot overwrite them. `shell/README.md` carries the reasoning.
+
+5. **Machine**: apply `machine/machine.json`, which declares the software that belongs on the
    box, what launches at login and with which flag, where the user folders live, and which
    background collection is off. Startup entries and user folders apply with no elevation.
    Software is only reported as present or missing unless you ask for it to be installed, and

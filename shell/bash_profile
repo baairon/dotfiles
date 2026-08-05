@@ -1,0 +1,5 @@
+# Login shells read this file; interactive non-login shells read ~/.bashrc. Sourcing one
+# from the other means there is a single place where interactive configuration lives, and
+# a login shell is not a different environment from a new tab.
+test -f ~/.profile && . ~/.profile
+test -f ~/.bashrc && . ~/.bashrc

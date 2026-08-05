@@ -1,0 +1,89 @@
+# Deployed to ~/.gitconfig.
+#
+# Machine-specific settings belong in ~/.gitconfig.local, which is included at the bottom
+# and never tracked. A later include wins in git, so anything in that file overrides
+# everything here: a second identity, a safe.directory entry for one odd checkout, or a
+# different autocrlf on a machine that is not Windows.
+
+[user]
+	email = hi@bairon.dev
+	name = bairon.dev
+
+[core]
+	# true is the Windows value: LF in the repository, CRLF in the working tree. On Linux
+	# and macOS this wants to be `input` instead, set from ~/.gitconfig.local.
+	autocrlf = true
+	excludesFile = ~/.gitignore_global
+	# No pager. Output lands in the scrollback where it can be read alongside everything
+	# else, rather than taking over the terminal and disappearing on quit.
+	pager = cat
+
+[init]
+	defaultBranch = main
+
+[pull]
+	# Never silently create a merge commit on pull. A pull that cannot fast-forward is a
+	# situation to look at, not something to paper over.
+	ff = only
+
+[push]
+	default = simple
+	autoSetupRemote = true
+	# followTags is deliberately NOT set. It would push tags along with commits, which
+	# would make publishing a release a side effect of an ordinary push instead of the
+	# separate, deliberate step it is meant to be.
+
+[fetch]
+	prune = true
+	# pruneTags is deliberately NOT set. It deletes local tags that are not on the remote,
+	# and a release tag exists locally before it is pushed, so any fetch in that window
+	# would silently destroy it.
+
+[diff]
+	# histogram reads better than the default on real code: it anchors on unique lines, so
+	# a moved block shows up as a move rather than as one deletion and one addition.
+	algorithm = histogram
+	colorMoved = zebra
+	renames = true
+	# mnemonicPrefix is deliberately NOT set. It swaps the a/ and b/ path prefixes for
+	# i/ w/ c/ o/ depending on what is being compared, which reads nicely and breaks every
+	# tool that parses diff output expecting a/ and b/.
+
+[merge]
+	# zdiff3 shows the common ancestor inside a conflict, which is what turns "these two
+	# versions differ" into "here is what each side changed".
+	conflictStyle = zdiff3
+
+[rebase]
+	autosquash = true
+	autostash = true
+
+[branch]
+	sort = -committerdate
+
+[column]
+	ui = auto
+
+[rerere]
+	# Remember how a conflict was resolved and replay it if the same one comes back.
+	enabled = true
+
+[status]
+	# List the files inside an untracked directory rather than collapsing it to one line.
+	# Reviewing a diff before committing is the habit this supports: a collapsed folder
+	# hides what is about to be added.
+	showUntrackedFiles = all
+
+[log]
+	date = iso
+
+[alias]
+	s = status --short --branch
+	d = diff
+	ds = diff --staged
+	l = log --oneline --graph --decorate -20
+	last = show --stat --oneline HEAD
+	unstage = restore --staged
+
+[include]
+	path = ~/.gitconfig.local

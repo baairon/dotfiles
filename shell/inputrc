@@ -1,0 +1,34 @@
+# Readline configuration.
+#
+# The include is not optional. A ~/.inputrc replaces /etc/inputrc outright rather than
+# layering on top of it, so without this line every distribution default (the arrow keys
+# and Home/End among them) is silently dropped.
+$include /etc/inputrc
+
+# Completion: case-insensitive, and hyphen and underscore treated as the same character,
+# which is what makes half-remembered filenames complete on the first try.
+set completion-ignore-case on
+set completion-map-case on
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+set completion-query-items 60
+set colored-stats on
+set colored-completion-prefix on
+set mark-symlinked-directories on
+set skip-completed-text on
+
+set bell-style none
+set enable-bracketed-paste on
+
+# The big one: Up and Down search history for what has already been typed instead of
+# walking it blindly. Both encodings are bound because the same key sends a different
+# sequence in application mode than in normal mode, and terminals disagree about which
+# they use.
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+"\eOA": history-search-backward
+"\eOB": history-search-forward
+
+# Ctrl+Left / Ctrl+Right move by word.
+"\e[1;5C": forward-word
+"\e[1;5D": backward-word

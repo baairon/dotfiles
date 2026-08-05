@@ -1,0 +1,20 @@
+# Ignored in every repository on this machine. Only things that are never a project's own
+# content belong here: anything a specific repo should ignore belongs in its .gitignore,
+# where a collaborator can see it.
+
+# Agent working state
+.claude
+**/.claude/settings.local.json
+
+# OS droppings
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets, kept out of every repo by default rather than one .gitignore at a time.
+# A repo that ships a template is unaffected: .env.example does not match either pattern.
+.env
+.env.local
+
+# Timestamped rollbacks written by this repo's installer
+*.bak-*

@@ -174,10 +174,26 @@ hotkeys:
   close-tab:
     - Ctrl-Shift-W
     - Ctrl-W
+  debug-save-state:
+    - Ctrl-Shift-Alt-1
+  debug-load-state:
+    - Ctrl-Shift-Alt-2
+  debug-copy-state:
+    - Ctrl-Shift-Alt-3
+  debug-paste-state:
+    - Ctrl-Shift-Alt-4
+  debug-save-output:
+    - Ctrl-Shift-Alt-5
+  debug-load-output:
+    - Ctrl-Shift-Alt-6
+  debug-copy-output:
+    - Ctrl-Shift-Alt-7
+  debug-paste-output:
+    - Ctrl-Shift-Alt-8
+  pin-tab: []
 terminal:
   profile: local:git-bash
   frontend: xterm-webgl
-  workingDirectory: C:\Users\bairo
   searchOptions: {}
   colorScheme:
     name: Custom
@@ -202,13 +218,12 @@ terminal:
       - '#b7fff9'
       - '#ffffff'
   customColorSchemes: []
-  ligatures: false
   fontWeight: 300
   fontWeightBold: 600
   paletteGenerate: false
   paletteHarmonious: false
-  fontSize: 17
-  cursor: block
+  fontSize: 19
+  cursor: beam
   font: CozetteVector
 ssh: {}
 clickableLinks: {}
@@ -217,7 +232,7 @@ accessibility:
 appearance:
   frame: native
   vibrancy: true
-  opacity: 0.99
+  opacity: 0.81
 hacks:
   disableGPU: false
 providerBlacklist: []

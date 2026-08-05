@@ -251,7 +251,7 @@ local ARROW_UP = "\226\150\178"
 local ARROW_DOWN = "\226\150\188"
 
 local HELP_DIRS = "↵ open   e dev   c clone   d delete   esc back"
-local HELP_RECENT = "↵ open   d forget   esc back"
+local HELP_RECENT = "↵ open   d forget   c clear   esc back"
 
 local function draw_picker(row)
   local recent = (view == "recent")
@@ -551,6 +551,17 @@ local function forget_selected()
   end
 end
 
+-- wiping the list is the same trade at every row: the file empties, the
+-- directories stay. one confirm, since ten entries go at once
+local function clear_recent()
+  if committed or busy or view ~= "recent" then return end
+  status = nil
+  if vim.fn.confirm("Clear all recent history?", "&Yes\n&No", 2) ~= 1 then return end
+  write_recent({})
+  build_recent_items()
+  dir_sel, status = 1, "no history yet"
+end
+
 function M.show(on_done)
   if #vim.api.nvim_list_uis() == 0 then
     return on_done()
@@ -626,7 +637,9 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
-  kmap("c", clone_repo)
+  kmap("c", function()
+    if view == "recent" then clear_recent() else clone_repo() end
+  end)
   kmap("d", function()
     if view == "recent" then forget_selected() else delete_dir() end
   end)

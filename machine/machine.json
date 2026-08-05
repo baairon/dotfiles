@@ -1,0 +1,139 @@
+{
+  "_comment": "Declarative machine state. The dotfiles-setup skill reads this file and applies it. Paths use %VAR% placeholders that are expanded at deploy time, so nothing here is pinned to one username. JSON rather than YAML because the installer runs on node: builtins with zero dependencies.",
+  "version": 1,
+
+  "software": [
+    { "name": "Tabby",                "winget": "Eugeny.Tabby",                "role": "terminal",     "why": "The terminal the whole dotfiles profile targets." },
+    { "name": "Neovim",               "winget": "Neovim.Neovim",               "role": "editor",       "why": "Editor config in nvim/ expects 0.10 or later." },
+    { "name": "Git",                  "winget": "Git.Git",                     "role": "core",         "why": "Ships git-bash, which is the default Tabby profile (local:git-bash)." },
+    { "name": "GitHub CLI",           "winget": "GitHub.cli",                  "role": "core",         "why": "Repo and PR work from the terminal." },
+    { "name": "ripgrep",              "winget": "BurntSushi.ripgrep.MSVC",     "role": "editor-dep",   "why": "Backs telescope live grep." },
+    { "name": "lazygit",              "winget": "JesseDuffield.lazygit",       "role": "editor-dep",   "why": "The <leader>gg git float." },
+    { "name": "Proton Drive",         "winget": "Proton.ProtonDrive",          "role": "cloud",        "why": "The only cloud sync on this machine; backs up Pictures." },
+    { "name": "Proton VPN",           "winget": "Proton.ProtonVPN",            "role": "network",      "why": "Always-available VPN client." },
+    { "name": "Proton Authenticator", "winget": "Proton.ProtonAuthenticator",  "role": "security",     "why": "2FA, same vendor as the rest of the Proton stack." },
+    { "name": "Discord",              "winget": "Discord.Discord",             "role": "chat",         "why": "Tray-resident chat." },
+    { "name": "Logitech G HUB",       "winget": "Logitech.GHUB",               "role": "peripherals",  "why": "Mouse and keyboard profiles; onboard profiles persist without it running." },
+    { "name": "G-Helper",             "winget": "seerge.g-helper",             "role": "peripherals",  "detectPath": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\GHelper.exe", "why": "ASUS fan and performance control. Runs as a portable exe dropped in the Startup folder rather than a winget install, so winget correctly reports it absent; detectPath is what actually answers whether it is there." }
+  ],
+
+  "startup": {
+    "_comment": "scope 'user' is HKCU Run and applies with no elevation. scope 'machine' is HKLM Run and is recorded for reference only, never written by the installer. scope 'startup-folder' is a file the user drops in themselves.",
+
+    "enabled": [
+      {
+        "name": "Tabby",
+        "scope": "user",
+        "exe": "%LOCALAPPDATA%\\Programs\\Tabby\\Tabby.exe",
+        "args": ["--hidden"],
+        "why": "Boots straight to the tray. --hidden is Tabby's own documented flag ('Start minimized'); the boot path then calls Electron's focus() rather than show(), so a hidden window stays hidden. Ctrl-Space drops it down."
+      },
+      {
+        "name": "Proton Drive",
+        "scope": "user",
+        "exe": "%LOCALAPPDATA%\\Programs\\Proton\\Drive\\ProtonDrive.exe",
+        "args": ["-quiet"],
+        "why": "Tray-resident sync, no window at login."
+      },
+      {
+        "name": "Proton VPN",
+        "scope": "user",
+        "exe": "%ProgramFiles%\\Proton\\VPN\\ProtonVPN.Launcher.exe",
+        "command": "%ProgramFiles%\\Proton\\VPN\\ProtonVPN.Launcher.exe \"----ms-protocol:ms-encodedlaunch:App?ContractId=Windows.StartupTask&TaskId=Proton%20VPN\"",
+        "why": "Launcher hands off to the packaged app's StartupTask. Written verbatim via 'command' because Proton registers it with the exe UNQUOTED and the argument QUOTED, and that argument contains & and ?, so re-composing it in the usual \"exe\" arg shape would change how it parses. The %20 is URL encoding, not an environment variable, so the expander must leave it alone."
+      },
+      {
+        "name": "Discord",
+        "scope": "user",
+        "exe": "%LOCALAPPDATA%\\Discord\\Update.exe",
+        "args": ["--processStart", "Discord.exe", "--process-start-args", "--start-minimized"],
+        "why": "Tray only. Discord's updater shim is the real startup target, not Discord.exe."
+      },
+      {
+        "name": "LGHUB",
+        "scope": "user",
+        "exe": "%ProgramFiles%\\LGHUB\\system_tray\\lghub_system_tray.exe",
+        "args": ["--minimized"],
+        "why": "Tray only. Peripherals keep working without it; it is only needed to change DPI, lighting or macros."
+      },
+      {
+        "name": "AMDNoiseSuppression",
+        "scope": "user",
+        "exe": "%SystemRoot%\\system32\\AMD\\ANR\\AMDNoiseSuppression.exe",
+        "args": [],
+        "why": "AMD microphone noise removal. The one entry with no minimize flag; kept because it is a driver-level feature, but it is the weakest-value item on this list."
+      },
+      {
+        "name": "GHelper",
+        "scope": "startup-folder",
+        "exe": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\GHelper.exe",
+        "args": [],
+        "why": "ASUS fan and performance control, native tray app. Lives as a portable exe in the Startup folder rather than a Run entry."
+      },
+      {
+        "name": "SecurityHealth",
+        "scope": "machine",
+        "exe": "%SystemRoot%\\system32\\SecurityHealthSystray.exe",
+        "args": [],
+        "why": "Windows Security tray icon. Windows owns this entry; recorded so the list is complete, never written by the installer."
+      }
+    ],
+
+    "disabled": [
+      { "match": "Figma Agent",                  "scope": "user",    "why": "Design-tool font helper; only needed while Figma is open." },
+      { "match": "utweb",                        "scope": "user",    "why": "uTorrent Web tray; torrent work happens in torlink." },
+      { "match": "RobloxPlayerBeta",             "scope": "user",    "why": "Game launcher has no reason to boot with the OS." },
+      { "match": "MicrosoftEdgeAutoLaunch_*",    "scope": "user",    "why": "Edge preloading itself at login. Suffix is a per-machine hex id, so this must match by prefix." },
+      { "match": "MicrosoftCopilotAutoLaunch_*", "scope": "user",    "why": "Copilot preloading itself at login. Same per-machine hex suffix." },
+      { "match": "StartAUEP",                    "scope": "machine", "why": "AMD User Experience Program launcher, the telemetry front end. See privacy.services for the service half." },
+      { "match": "ASUS Smart Display Control",   "scope": "machine", "why": "Vendor display utility, unused." },
+      { "match": "Adobe Creative Cloud",         "scope": "machine", "why": "Heavy vendor updater; launch Creative Cloud on demand instead." },
+      { "match": "Adobe CCXProcess",             "scope": "machine", "why": "Creative Cloud companion process, same reasoning." },
+      { "match": "HuionTablet",                  "scope": "machine", "why": "Drawing-tablet driver tray; only needed when the tablet is plugged in." },
+      { "match": "SunJavaUpdateSched",           "scope": "machine", "why": "Java update scheduler, a classic always-on nuisance." }
+    ]
+  },
+
+  "knownFolders": {
+    "_comment": "Policy: the user profile folders stay local and are never redirected into a cloud-sync folder. Screenshots deliberately sits OUTSIDE Pictures, because Pictures is what Proton Drive backs up and the screenshot history does not belong in cloud backup.",
+    "_regNameNote": "regName is the value name Windows actually stores under User Shell Folders, which is not the friendly name: Documents is 'Personal' and Pictures is 'My Pictures'. It is read to detect drift before repointing.",
+    "shell": [
+      { "name": "Desktop",     "regName": "Desktop",                                  "guid": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641", "path": "%USERPROFILE%\\Desktop",     "why": "Local, never cloud-redirected." },
+      { "name": "Documents",   "regName": "Personal",                                 "guid": "FDD39AD0-238F-46AF-ADB4-6C85480369C7", "path": "%USERPROFILE%\\Documents",   "why": "Local, never cloud-redirected." },
+      { "name": "Pictures",    "regName": "My Pictures",                              "guid": "33E28130-4E1E-4676-835A-98395C3BC3BB", "path": "%USERPROFILE%\\Pictures",    "why": "Local on disk; Proton Drive backs this folder up." },
+      { "name": "Screenshots", "regName": "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}",   "guid": "B7BEDE81-DF94-4682-A7D8-57A52620B86F", "path": "%USERPROFILE%\\Screenshots", "why": "Deliberately moved out of Pictures so Win+PrtScn captures are not swept into cloud backup. This is NOT the Windows default, which is %USERPROFILE%\\Pictures\\Screenshots." }
+    ],
+    "userShellFolderValues": [
+      { "name": "{F42EE2D3-909F-4907-8871-4C22FC0BF756}", "path": "%USERPROFILE%\\Documents", "why": "The 'This PC' Documents node. Not covered by SHSetKnownFolderPath, and it silently kept pointing at a deleted OneDrive path until it was fixed by hand." },
+      { "name": "{0DDD015D-B06C-45D5-8C4C-F59713854639}", "path": "%USERPROFILE%\\Pictures",  "why": "The 'This PC' Pictures node, same failure mode." }
+    ]
+  },
+
+  "privacy": {
+    "_comment": "Everything here needs administrator rights, so the installer never applies it directly. It emits a reviewable script instead (--privacy).",
+    "services": [
+      { "name": "DiagTrack",    "startMode": "Disabled", "why": "Connected User Experiences and Telemetry, the main Windows telemetry pipe. Cost: Feedback Hub stops working and some Windows Update diagnostics go quiet. Windows Update, Defender and activation are unaffected." },
+      { "name": "AUEPLauncher", "startMode": "Disabled", "why": "AMD User Experience Program Data Uploader. Pure usage-data collection with no user-facing function." }
+    ],
+    "scheduledTasks": [
+      { "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\", "name": "Consolidator", "state": "Disabled", "why": "CEIP data collection. No functional loss." },
+      { "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\", "name": "UsbCeip",      "state": "Disabled", "why": "CEIP USB data collection. No functional loss." }
+    ],
+    "deliberatelyNotApplied": [
+      { "name": "Microsoft Compatibility Appraiser", "why": "Sits in the same task folder family but is app-compatibility plumbing feeding upgrade readiness, not telemetry. Left enabled on purpose." },
+      { "name": "AllowTelemetry policy",             "why": "Left at 1 (Required). Windows 11 Home floors telemetry at Required regardless of the policy value, so setting it to 0 would imply an off switch that does not exist. Not worth pretending." }
+    ]
+  },
+
+  "cloudSync": {
+    "_comment": "See machine/README.md. OneDrive removal is documented but deliberately never automated, because online-only placeholder files must be hydrated first or the data is destroyed.",
+    "provider": "Proton Drive",
+    "onedrive": "absent",
+    "syncedFolders": [
+      { "path": "%USERPROFILE%\\Pictures", "why": "Backed up by Proton Drive's folder-backup mapping." }
+    ],
+    "excludedFromSync": [
+      { "path": "%USERPROFILE%\\Screenshots", "why": "Screenshot history is high-volume and low-value; kept out of cloud backup by living outside Pictures." }
+    ]
+  }
+}

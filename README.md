@@ -1,7 +1,8 @@
 # dotfiles
 
-Source of truth for my terminal and editor configuration. The `dotfiles-setup` skill reads
-these files straight from the repo, so editing here is all the next machine needs.
+Source of truth for my machine: terminal, editor, and the setup around them. The
+`dotfiles-setup` skill reads these files straight from the repo, so editing here is all the
+next machine needs.
 
 ## Layout
 
@@ -12,6 +13,7 @@ these files straight from the repo, so editing here is all the next machine need
 | `nvim/lua/config/`  | options, theme, keymaps, layout, splash, gitstat                      |
 | `nvim/lua/plugins/` | One lazy.nvim spec per plugin                                         |
 | `tabby/config.yaml` | The Tabby profile                                                    |
+| `machine/`          | The machine itself: software, login startup, user folders, privacy   |
 
 ## Provisioning
 
@@ -55,8 +57,16 @@ these files straight from the repo, so editing here is all the next machine need
    ```yaml
    terminal:
      font: CozetteVector
-     fontSize: 17
+     fontSize: 19
    ```
+
+4. **Machine**: apply `machine/machine.json`, which declares the software that belongs on the
+   box, what launches at login and with which flag, where the user folders live, and which
+   background collection is off. Startup entries and user folders apply with no elevation.
+   Software is only reported as present or missing unless you ask for it to be installed, and
+   the privacy changes need administrator rights so they are emitted as a script to review and
+   run yourself. `machine/README.md` carries the reasoning, including the manual OneDrive
+   removal sequence that is deliberately never automated.
 
 Every target applies from whatever the files currently hold, never a baked-in snapshot.
 
@@ -69,8 +79,8 @@ Every target applies from whatever the files currently hold, never a baked-in sn
   The profile pins `fontWeightBold: 600` and keeps that synthesis. Dropping it to `400` is
   what turns the synthesis off, by asking for bold text at the one weight the family
   actually has.
-- `fontSize: 17` is the baked-in equivalent of pressing Ctrl+= twice from 14. Tabby scales
-  zoom by `1.1^steps` and never persists it, so pinning the size is the only way to make it
-  survive a restart, and it moves what `reset-zoom` (Ctrl+0) returns to.
+- `fontSize: 19` is a baked-in zoom level. Tabby scales zoom by `1.1^steps` and never persists
+  it, so pinning the size is the only way to make it survive a restart, and it moves what
+  `reset-zoom` (Ctrl+0) returns to.
 - Cozette is a 6x13 bitmap font and these TTFs are the outline conversion, so 13 and 26 are
   the only sizes that land exactly on its pixel grid. Everything else renders slightly soft.

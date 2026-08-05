@@ -21,6 +21,16 @@ function looksLikeRepo(dir) {
   return REPO_MARKERS.some((d) => isDir(path.join(dir, d)));
 }
 
+// Which checkout the read-only commands (--list) should read. Deliberately never clones, and
+// deliberately shared: when only resolveRepo knew about the self checkout, `--list` run from
+// inside the repo answered "no machine/machine.json on disk" while standing in the repo,
+// because it was still looking in the clone cache. One resolver, one answer.
+function listCheckout(opts) {
+  if (opts.repo && isDir(opts.repo)) return opts.repo;
+  if (looksLikeRepo(SELF_DIR)) return SELF_DIR;
+  return cacheRepoDir();
+}
+
 function tabbyConfigDir() {
   if (PLATFORM === 'win32') {
     const appData = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
@@ -493,9 +503,13 @@ function backupMachineRegistry() {
 
 function softwareStatus(manifest) {
   return (manifest.software || []).map((s) => {
-    // A declared path wins: some things are installed without going through winget at all
-    // (G-Helper is a portable exe dropped in the Startup folder), and for those winget
-    // correctly reports "not found" while the software is very much present.
+    // Declared detection wins over winget, because winget only knows what winget installed.
+    // detectOnPath covers the common case: node from the nodejs.org MSI and tree-sitter from
+    // `npm i -g` are both absent from `winget list` while sitting right there on PATH, and
+    // reporting those as MISSING would be the installer lying about the machine it is on.
+    if (s.detectOnPath && onPath(s.detectOnPath)) return { ...s, installed: true };
+    // detectPath is the same idea for something that is not on PATH at all: G-Helper is a
+    // portable exe dropped into the Startup folder.
     if (s.detectPath && exists(expandEnv(s.detectPath))) return { ...s, installed: true };
     return { ...s, installed: wingetHas(s.winget) };
   });
@@ -805,18 +819,41 @@ function printList(opts) {
   }
   console.log('');
   printMachineList(opts);
+  printPrerequisites(opts);
+}
+
+// Prerequisites come from the manifest, never from string literals here. A package id
+// written in code has nothing to be checked against, which is how `TreeSitter.TreeSitter`
+// (a package that does not exist) sat in this function printing an install command that
+// could only ever fail. machine/machine.json is now the one place an id is allowed to live.
+function printPrerequisites(opts) {
+  const checkout = listCheckout(opts);
+  let manifest = null;
+  try { manifest = readManifest(checkout); } catch { /* unreadable: fall through */ }
+  const rows = (manifest?.software || []).filter((s) => s.prerequisite);
+
   console.log('Prerequisites (never auto-installed):');
-  console.log(`  git         : ${onPath('git') ? 'present' : 'MISSING (needed to clone)'}`);
-  console.log(`  nvim        : ${onPath('nvim') ? 'present' : 'MISSING'}`);
-  console.log(`  tree-sitter : ${onPath('tree-sitter') ? 'present' : 'MISSING (winget install TreeSitter.TreeSitter); 0.26+, builds the parsers'}`);
-  console.log(`  lazygit     : ${onPath('lazygit') ? 'present' : 'MISSING (winget install JesseDuffield.lazygit)'}`);
-  console.log(`  ripgrep     : ${onPath('rg') ? 'present' : 'MISSING (winget install BurntSushi.ripgrep.MSVC)'}`);
+  if (!rows.length) {
+    // No manifest on disk yet. Report what is here, but do not invent an install command:
+    // the ids live in the checkout, and guessing one is the exact mistake this replaces.
+    for (const bin of ['git', 'node', 'nvim']) {
+      console.log(`  ${bin.padEnd(12)}: ${onPath(bin) ? 'present' : 'MISSING'}`);
+    }
+    console.log('  (clone the repo for the full list with install commands)');
+    return;
+  }
+  for (const s of rows) {
+    const bin = s.detectOnPath || '';
+    const have = bin ? onPath(bin) : (wingetHas(s.winget) === true);
+    const hint = PLATFORM === 'win32' ? ` (winget install ${s.winget})` : ` (${s.winget})`;
+    console.log(`  ${(bin || s.name).padEnd(12)}: ${have ? 'present' : `MISSING${hint}`}`);
+  }
 }
 
 // Same no-clone rule as fontStatus: read whatever checkout is already on disk. On a
 // non-Windows box the machine layer is not applicable, so say so rather than listing rows.
 function printMachineList(opts) {
-  const checkout = (opts.repo && isDir(opts.repo)) ? opts.repo : cacheRepoDir();
+  const checkout = listCheckout(opts);
   let manifest = null;
   try { manifest = readManifest(checkout); } catch { /* unreadable: treated as absent */ }
   if (!manifest) {
@@ -864,7 +901,7 @@ function printMachineList(opts) {
 // disk (an explicit --repo, else the cache). With neither, only the dir row is shown:
 // the repo is what says which fonts belong, never the OS font dir's own contents.
 function fontStatus(opts) {
-  const checkout = (opts.repo && isDir(opts.repo)) ? opts.repo : cacheRepoDir();
+  const checkout = listCheckout(opts);
   const fromRepo = path.join(checkout, 'fonts');
   if (!isDir(fromRepo)) return [];
   return fs.readdirSync(fromRepo)
@@ -999,6 +1036,35 @@ function selftest() {
     check('looksLikeRepo accepts a shell-only checkout', looksLikeRepo(shTmp) === true);
   } finally {
     fs.rmSync(shTmp, { recursive: true, force: true });
+  }
+
+  // Package ids. The defect these guard against was a winget id written straight into this
+  // file, where nothing could ever compare it to anything: it named a package that does not
+  // exist and the installer printed it as an install command for as long as it was there.
+  const selfSrc = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  check('no package id is hardcoded in this file',
+    (selfSrc.match(/winget install (?!\$\{)[A-Za-z]/g) || []).length === 0);
+
+  let mf = null;
+  try { mf = readManifest(listCheckout({})); } catch { /* no checkout: skip these */ }
+  if (mf) {
+    const sw = mf.software || [];
+    check('manifest declares software', sw.length > 0);
+    check('every entry carries a winget id', sw.every((s) => typeof s.winget === 'string' && s.winget));
+    check('every id has Publisher.Package shape',
+      sw.every((s) => /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/.test(s.winget)));
+    check('every entry explains itself', sw.every((s) => typeof s.why === 'string' && s.why.length > 10));
+    check('ids are unique', new Set(sw.map((s) => s.winget)).size === sw.length);
+    // The installer cannot run without these two, so their absence from the manifest is the
+    // gap that left a bare machine with nothing to bootstrap from.
+    check('node is declared', sw.some((s) => s.detectOnPath === 'node'));
+    check('git is declared', sw.some((s) => s.detectOnPath === 'git'));
+    const pre = sw.filter((s) => s.prerequisite);
+    check('prerequisites are marked', pre.length >= 6);
+    check('every prerequisite is detectable without winget', pre.every((s) => !!s.detectOnPath));
+    // rg, not ripgrep: naming the package instead of the binary is a silent false MISSING.
+    check('prerequisite detection names the binary, not the package',
+      pre.every((s) => !s.detectOnPath.includes('.') && s.detectOnPath === s.detectOnPath.toLowerCase()));
   }
 
   console.log(`selftest: ${pass} checks passed, ${fails.length} failed`);

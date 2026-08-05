@@ -33,9 +33,38 @@ driver-level microphone feature, but it is the first thing to cut if the login s
 install command; it never installs anything unless you pass `--install-software`. That mirrors how the
 skill has always treated prerequisites.
 
-G-Helper is the one oddity: it has a winget id (`seerge.g-helper`) but is currently running as a portable
-executable dropped straight into the Startup folder, which is why it shows up under `startup-folder` scope
-rather than as a Run entry.
+**This file is the only place a package id may live.** The installer prints its install hints from these
+ids instead of from string literals in its own source. That rule exists because it was broken: a
+`TreeSitter.TreeSitter` id written directly into `install.mjs` named a package that does not exist, and
+because it sat in code rather than in data there was nothing it could be compared against. Every id here
+is checked with `winget show --id <id> --exact`, and the installer's selftest fails if a package id
+reappears as a literal in code.
+
+### Detection is not the same question as installation
+
+An entry is detected in this order: `detectOnPath`, then `detectPath`, then winget. The first two exist
+because software installed through another channel is still installed, while `winget list` only reports
+what winget itself put there. On this machine both of these are true right now:
+
+- **Node.js** came from the nodejs.org MSI, so winget does not see it.
+- **tree-sitter CLI** came from `npm i -g tree-sitter-cli`, so winget does not see it either.
+
+Declared with only a winget id, both would be reported `[MISSING]` while sitting on `PATH` and working
+perfectly, which is the installer lying about the machine it is running on. `detectOnPath` names the
+**binary**, not the package: ripgrep's binary is `rg`, and getting that wrong is the same false MISSING by
+a different route.
+
+G-Helper is the case `detectPath` was added for: it has a winget id (`seerge.g-helper`) but is currently
+running as a portable executable dropped straight into the Startup folder, which is why it shows up under
+`startup-folder` scope rather than as a Run entry, and why winget correctly reports it absent.
+
+### Prerequisites
+
+Entries marked `"prerequisite": true` are what the setup itself needs, as opposed to software that simply
+belongs on the machine: Neovim, Git, Node.js, ripgrep, lazygit and the tree-sitter CLI. `--list` prints
+that subset with its install commands. Git and Node.js are the two the installer cannot bootstrap on its
+own, since it is a node script living in a git repository; `bootstrap.ps1` at the repo root is the
+answer to that, and it reads their ids from this file rather than carrying its own copy.
 
 ## User folders
 

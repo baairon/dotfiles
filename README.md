@@ -10,6 +10,7 @@ machine needs.
 
 | Path                | Purpose                                                              |
 |---------------------|----------------------------------------------------------------------|
+| `bootstrap.ps1`     | Bare-machine entry point: installs git and node, then runs the installer |
 | `install.mjs`       | The installer. Deploys every folder below                            |
 | `fonts/`            | Vendored terminal font, installed per-user                            |
 | `nvim/`             | Neovim config (lazy.nvim; plugin versions pinned in `lazy-lock.json`) |
@@ -20,6 +21,30 @@ machine needs.
 | `machine/`          | The machine itself: software, login startup, user folders, privacy   |
 
 ## Provisioning
+
+### Bare machine
+
+`install.mjs` is a node script in a git repository, so it cannot be what puts git and node on
+a machine that has neither. `bootstrap.ps1` is the piece that runs before them: stock Windows
+PowerShell, no dependencies. It installs those two through winget, refreshes `PATH` in the
+running session (winget writes the new `PATH` to the registry, not to the shell that called
+it, which is why a fresh install otherwise stays invisible until a new terminal), clones the
+repo, and hands over.
+
+Download it, read it, then run it:
+
+```powershell
+irm https://raw.githubusercontent.com/baairon/dotfiles/main/bootstrap.ps1 -OutFile bootstrap.ps1
+notepad bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+It installs only what the installer itself needs. Everything else in `machine/machine.json`
+is reported, not installed, unless asked for with `--install-software`. Arguments are passed
+straight through, so `.\bootstrap.ps1 --machine` works.
+
+### Everything after that
 
 One command, from a fresh clone:
 

@@ -2,13 +2,17 @@
   "_comment": "Declarative machine state. The dotfiles-setup skill reads this file and applies it. Paths use %VAR% placeholders that are expanded at deploy time, so nothing here is pinned to one username. JSON rather than YAML because the installer runs on node: builtins with zero dependencies.",
   "version": 1,
 
+  "_softwareComment": "This list is the ONLY place a package id is allowed to live. The installer prints its install hints from these ids rather than from string literals in code, because the one id that was written in code (a wrong tree-sitter id) went unchecked for exactly as long as it had nowhere to be compared against. Every id here is verified with `winget show --id <id> --exact`. Detection order is detectOnPath, then detectPath, then winget: the first two exist because software installed through another channel is still installed, and winget reports only what winget put there.",
+
   "software": [
     { "name": "Tabby",                "winget": "Eugeny.Tabby",                "role": "terminal",     "why": "The terminal the whole dotfiles profile targets." },
-    { "name": "Neovim",               "winget": "Neovim.Neovim",               "role": "editor",       "why": "Editor config in nvim/ expects 0.10 or later." },
-    { "name": "Git",                  "winget": "Git.Git",                     "role": "core",         "why": "Ships git-bash, which is the default Tabby profile (local:git-bash)." },
+    { "name": "Neovim",               "winget": "Neovim.Neovim",               "role": "editor",       "prerequisite": true, "detectOnPath": "nvim",        "why": "Editor config in nvim/ expects 0.10 or later." },
+    { "name": "Git",                  "winget": "Git.Git",                     "role": "core",         "prerequisite": true, "detectOnPath": "git",         "why": "Ships git-bash, which is the default Tabby profile (local:git-bash), and is what clones this repo in the first place." },
+    { "name": "Node.js",              "winget": "OpenJS.NodeJS.LTS",           "role": "core",         "prerequisite": true, "detectOnPath": "node",        "why": "Runs install.mjs, so it is the one thing that has to exist before any of this applies. Usually installed from the nodejs.org MSI or a version manager, none of which winget can see, which is why detection is PATH-first." },
     { "name": "GitHub CLI",           "winget": "GitHub.cli",                  "role": "core",         "why": "Repo and PR work from the terminal." },
-    { "name": "ripgrep",              "winget": "BurntSushi.ripgrep.MSVC",     "role": "editor-dep",   "why": "Backs telescope live grep." },
-    { "name": "lazygit",              "winget": "JesseDuffield.lazygit",       "role": "editor-dep",   "why": "The <leader>gg git float." },
+    { "name": "ripgrep",              "winget": "BurntSushi.ripgrep.MSVC",     "role": "editor-dep",   "prerequisite": true, "detectOnPath": "rg",          "why": "Backs telescope live grep. The binary is rg, not ripgrep." },
+    { "name": "lazygit",              "winget": "JesseDuffield.lazygit",       "role": "editor-dep",   "prerequisite": true, "detectOnPath": "lazygit",     "why": "The <leader>gg git float." },
+    { "name": "tree-sitter CLI",      "winget": "tree-sitter.tree-sitter-cli", "role": "editor-dep",   "prerequisite": true, "detectOnPath": "tree-sitter", "why": "nvim-treesitter tracks its main branch, which builds parsers through this CLI instead of shipping them, so a fresh editor needs it plus a C compiler. 0.26 or later. Commonly installed with `npm i -g tree-sitter-cli`, which winget cannot see." },
     { "name": "Proton Drive",         "winget": "Proton.ProtonDrive",          "role": "cloud",        "why": "The only cloud sync on this machine; backs up Pictures." },
     { "name": "Proton VPN",           "winget": "Proton.ProtonVPN",            "role": "network",      "why": "Always-available VPN client." },
     { "name": "Proton Authenticator", "winget": "Proton.ProtonAuthenticator",  "role": "security",     "why": "2FA, same vendor as the rest of the Proton stack." },

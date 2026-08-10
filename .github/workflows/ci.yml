@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The installer already carries its own checks; this is what makes them run without
+  # someone remembering to. The matrix is the point: the font and shell layers have Linux
+  # and macOS branches that a Windows-only author never executes.
+  installer:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: selftest
+        run: node install.mjs --selftest
+
+      # A clone has no machine/machine.json, so this is also the fresh-machine path: it must
+      # report a plan rather than fall over, and it must never install the optional fonts.
+      - name: dry run, writes nothing
+        run: node install.mjs --dry-run --repo .
+
+      - name: dry run with the machine layer
+        run: node install.mjs --machine --dry-run --repo .
+
+      - name: dry run with the optional fonts
+        run: node install.mjs --dry-run --optional-fonts --repo .
+
+      - name: detection status
+        run: node install.mjs --list --repo .
+
+      - name: help exits clean
+        run: node install.mjs --help
+
+  # The editor config is the largest thing this repo ships and nothing else parses it.
+  lua:
+    name: lua parses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install luajit
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq luajit
+
+      # -b compiles without running, so a config that would only fail at editor start-up
+      # fails here instead. No style opinions, syntax only.
+      - name: parse every lua file
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if luajit -bl "$f" /dev/null; then
+              echo "ok   $f"
+            else
+              echo "FAIL $f"
+              fail=1
+            fi
+          done < <(find nvim -name '*.lua' -print | sort)
+          exit $fail
+
+  # Everything the repo promises about what it does not publish, asserted rather than trusted.
+  privacy:
+    name: nothing tracked names a machine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: no per-machine files are tracked
+        run: |
+          for f in machine/machine.json machine/NOTES.local.md .claude/settings.local.json; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "tracked but must not be: $f"
+              exit 1
+            fi
+          done
+          echo "none of the per-machine files are tracked"
+
+      - name: the tracked example manifest parses
+        run: node -e "JSON.parse(require('fs').readFileSync('machine/machine.example.json','utf8'))"

@@ -7,3 +7,7 @@
 # Vendored font binaries: never line-ending normalized
 *.ttf binary
 *.otf binary
+
+# Tooling, not the config this repo ships. Excluded from the language bar only.
+install.mjs   linguist-detectable=false
+bootstrap.ps1 linguist-detectable=false

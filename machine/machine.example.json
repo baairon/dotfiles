@@ -1,0 +1,83 @@
+{
+  "_comment": "The shape of a machine manifest, and the starting point for a real one. Copy this file to machine/machine.json, then edit it for the machine you are on: `cp machine/machine.example.json machine/machine.json`. The real manifest is gitignored, because a list of what is installed, what launches at login and where the user folders live describes a person's machine and this repo is public. Paths use %VAR% placeholders expanded at deploy time, so nothing here is pinned to one username. JSON rather than YAML because the installer runs on node: builtins with zero dependencies.",
+  "version": 1,
+
+  "_softwareComment": "This list is the ONLY place a package id is allowed to live. The installer prints its install hints from these ids rather than from string literals in code, because the one id that was written in code (a wrong tree-sitter id) went unchecked for exactly as long as it had nowhere to be compared against. Every id here is verified with `winget show --id <id> --exact`. Detection order is detectOnPath, then detectPath, then winget: the first two exist because software installed through another channel is still installed, and winget reports only what winget put there. What ships in this example is the toolchain this repo needs and nothing else; anything else that belongs on a given machine goes in that machine's own manifest.",
+
+  "software": [
+    { "name": "Tabby",           "winget": "Eugeny.Tabby",                "role": "terminal",   "why": "The terminal the profile in tabby/ targets." },
+    { "name": "Neovim",          "winget": "Neovim.Neovim",               "role": "editor",     "prerequisite": true, "detectOnPath": "nvim",        "why": "The config in nvim/ expects 0.10 or later." },
+    { "name": "Git",             "winget": "Git.Git",                     "role": "core",       "prerequisite": true, "detectOnPath": "git",         "why": "Ships git-bash, which is the default terminal profile (local:git-bash), and is what clones this repo in the first place." },
+    { "name": "Node.js",         "winget": "OpenJS.NodeJS.LTS",           "role": "core",       "prerequisite": true, "detectOnPath": "node",        "why": "Runs install.mjs, so it is the one thing that has to exist before any of this applies. Often installed from the nodejs.org MSI or a version manager, none of which winget can see, which is why detection is PATH-first." },
+    { "name": "ripgrep",         "winget": "BurntSushi.ripgrep.MSVC",     "role": "editor-dep", "prerequisite": true, "detectOnPath": "rg",          "why": "Backs telescope live grep. The binary is rg, not ripgrep." },
+    { "name": "lazygit",         "winget": "JesseDuffield.lazygit",       "role": "editor-dep", "prerequisite": true, "detectOnPath": "lazygit",     "why": "The <leader>gg git float." },
+    { "name": "tree-sitter CLI", "winget": "tree-sitter.tree-sitter-cli", "role": "editor-dep", "prerequisite": true, "detectOnPath": "tree-sitter", "why": "nvim-treesitter tracks its main branch, which builds parsers through this CLI instead of shipping them, so a fresh editor needs it plus a C compiler. 0.26 or later. Commonly installed with `npm i -g tree-sitter-cli`, which winget cannot see." }
+  ],
+
+  "startup": {
+    "_comment": "scope 'user' is HKCU Run and applies with no elevation. scope 'machine' is HKLM Run and is recorded for reference only, never written by the installer. scope 'startup-folder' is a file the user drops in themselves. The entries below are placeholders showing the three shapes; replace them.",
+
+    "enabled": [
+      {
+        "name": "ExampleTrayApp",
+        "scope": "user",
+        "exe": "%LOCALAPPDATA%\\Programs\\ExampleTrayApp\\ExampleTrayApp.exe",
+        "args": ["--hidden"],
+        "why": "The ordinary shape: an exe plus arguments, composed into a quoted Run command. Prefer a flag that lands the app in the tray so login stays quiet."
+      },
+      {
+        "name": "ExampleVerbatimApp",
+        "scope": "user",
+        "exe": "%ProgramFiles%\\Example\\Example.Launcher.exe",
+        "command": "%ProgramFiles%\\Example\\Example.Launcher.exe \"----ms-protocol:ms-encodedlaunch:App?ContractId=Windows.StartupTask&TaskId=Example%20App\"",
+        "why": "The escape hatch. Some installers register the exe UNQUOTED with the argument QUOTED, and when that argument contains & or ?, re-composing it in the usual exe+args shape changes how it parses. 'command' is written verbatim instead. The %20 is URL encoding, not an environment variable, so the expander must leave it alone."
+      },
+      {
+        "name": "ExamplePortableApp",
+        "scope": "startup-folder",
+        "exe": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ExamplePortableApp.exe",
+        "args": [],
+        "why": "A portable exe dropped in the Startup folder rather than registered as a Run entry. Detected with detectPath, since winget correctly reports it absent."
+      }
+    ],
+
+    "disabled": [
+      { "match": "ExampleVendorUpdater",     "scope": "user",    "why": "Matched by exact name. Disabled rather than deleted: the Run value stays and only the StartupApproved bit flips, and because that bit is keyed by value NAME it keeps blocking the launch even if the app rewrites its own launcher command. Deleting the value would hand the app its startup back the next time its in-app toggle is touched." },
+      { "match": "ExampleAutoLaunch_*",      "scope": "user",    "why": "Matched by prefix. Some entries carry a per-machine hex suffix, so an exact match would silently miss them." },
+      { "match": "ExampleMachineWideHelper", "scope": "machine", "why": "HKLM entries are recorded so the list is complete. The installer reports them and never writes them, because that hive needs elevation." }
+    ]
+  },
+
+  "knownFolders": {
+    "_comment": "Policy: the user profile folders stay local and are never redirected into a cloud-sync folder. The installer refuses to repoint a folder whose current location still holds files, reporting [BLOCKED] with the file count, because silently repointing is what strands data. Pass --force-folders if you mean it.",
+    "_regNameNote": "regName is the value name Windows actually stores under User Shell Folders, which is not the friendly name: Documents is 'Personal' and Pictures is 'My Pictures'. It is read to detect drift before repointing. The GUIDs are Windows shell constants and are the same on every machine.",
+    "shell": [
+      { "name": "Desktop",   "regName": "Desktop",  "guid": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641", "path": "%USERPROFILE%\\Desktop",   "why": "Local, never cloud-redirected." },
+      { "name": "Documents", "regName": "Personal", "guid": "FDD39AD0-238F-46AF-ADB4-6C85480369C7", "path": "%USERPROFILE%\\Documents", "why": "Local, never cloud-redirected." }
+    ],
+    "userShellFolderValues": [
+      { "name": "{F42EE2D3-909F-4907-8871-4C22FC0BF756}", "path": "%USERPROFILE%\\Documents", "why": "The 'This PC' Documents node. SHSetKnownFolderPath does not cover it, so it is written as a plain REG_EXPAND_SZ value. These are easy to miss: they can keep pointing at a path that no longer exists long after everything else has been repointed, with nothing surfacing an error." }
+    ]
+  },
+
+  "privacy": {
+    "_comment": "Everything here needs administrator rights, so the installer never applies it directly. It emits a reviewable script instead (--privacy).",
+    "services": [
+      { "name": "DiagTrack", "startMode": "Disabled", "why": "Connected User Experiences and Telemetry, the main Windows telemetry pipe. Cost: Feedback Hub stops working and some Windows Update diagnostics go quiet. Windows Update, Defender and activation are unaffected." }
+    ],
+    "scheduledTasks": [
+      { "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\", "name": "Consolidator", "state": "Disabled", "why": "CEIP data collection. No functional loss." }
+    ],
+    "deliberatelyNotApplied": [
+      { "name": "Microsoft Compatibility Appraiser", "why": "Sits in the same task folder family but is app-compatibility plumbing feeding upgrade readiness, not telemetry. Left enabled on purpose." },
+      { "name": "AllowTelemetry policy",             "why": "Left at 1 (Required). Windows 11 Home floors telemetry at Required regardless of the policy value, so setting it to 0 would imply an off switch that does not exist. Not worth pretending." }
+    ]
+  },
+
+  "cloudSync": {
+    "_comment": "Removing a sync client is documented per machine, never automated: Files On-Demand leaves most files as online-only placeholders that report a normal size while the bytes live in the cloud, so uninstalling without hydrating them first destroys the data.",
+    "provider": null,
+    "syncedFolders": [],
+    "excludedFromSync": []
+  }
+}

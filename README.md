@@ -1,35 +1,32 @@
 # dotfiles
 
 Source of truth for my machine: terminal, editor, shell, and the setup around them. The repo
-carries its own installer, so a clone provisions a machine on its own, and the
-`dotfiles-setup` skill is the remote path into the same code rather than a second copy of it.
-Either way the files here are what gets deployed, so editing this repo is all the next
+carries its own installer, so a clone provisions a machine on its own, and the `dotfiles-setup`
+skill on [agent.bairon.eth](https://8004scan.io/agents/base/45744?tab=metadata) is a remote path
+into that same installer. Neither keeps a copy of the files, so editing this repo is all the next
 machine needs.
 
 ## Layout
 
-| Path                | Purpose                                                              |
-|---------------------|----------------------------------------------------------------------|
+| Path                | Purpose                                                                  |
+|---------------------|--------------------------------------------------------------------------|
 | `bootstrap.ps1`     | Bare-machine entry point: installs git and node, then runs the installer |
-| `install.mjs`       | The installer. Deploys every folder below                            |
-| `fonts/`            | Vendored terminal font, installed per-user                            |
-| `nvim/`             | Neovim config (lazy.nvim; plugin versions pinned in `lazy-lock.json`) |
-| `nvim/lua/config/`  | options, theme, keymaps, layout, splash, gitstat                      |
-| `nvim/lua/plugins/` | One lazy.nvim spec per plugin                                         |
-| `tabby/config.yaml` | The Tabby profile                                                    |
-| `shell/`            | bash, readline, and git                                              |
-| `machine/`          | The machine itself: software, login startup, user folders, privacy   |
+| `install.mjs`       | The installer. Deploys every folder below                                |
+| `fonts/`            | Vendored terminal font, installed per-user                               |
+| `fonts/optional/`   | Other faces kept here, installed only on request                         |
+| `nvim/`             | Neovim config: `lua/config/` for settings, `lua/plugins/` one per plugin |
+| `tabby/config.yaml` | The terminal profile                                                     |
+| `shell/`            | bash, readline, and git                                                  |
+| `machine/`          | Optional machine layer, applied from a local manifest                    |
 
 ## Provisioning
 
 ### Bare machine
 
-`install.mjs` is a node script in a git repository, so it cannot be what puts git and node on
-a machine that has neither. `bootstrap.ps1` is the piece that runs before them: stock Windows
-PowerShell, no dependencies. It installs those two through winget, refreshes `PATH` in the
-running session (winget writes the new `PATH` to the registry, not to the shell that called
-it, which is why a fresh install otherwise stays invisible until a new terminal), clones the
-repo, and hands over.
+`install.mjs` is a node script in a git repository, so it cannot be what puts git and node on a
+machine that has neither. `bootstrap.ps1` runs before them: stock Windows PowerShell, no
+dependencies. It installs those two, makes them usable in the running session, clones the repo,
+and hands over.
 
 Download it, read it, then run it:
 
@@ -40,13 +37,11 @@ powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -DryRun
 powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
-It installs only what the installer itself needs. Everything else in `machine/machine.json`
-is reported, not installed, unless asked for with `--install-software`. Arguments are passed
-straight through, so `.\bootstrap.ps1 --machine` works.
+It installs only what the installer itself needs. Anything else is reported rather than installed
+unless you ask for it, and arguments are forwarded, so `.\bootstrap.ps1 --machine
+--install-software` reaches `install.mjs` untouched.
 
-### Everything after that
-
-One command, from a fresh clone:
+### From a clone
 
 ```bash
 git clone https://github.com/baairon/dotfiles
@@ -55,8 +50,8 @@ node install.mjs              # font, terminal, editor, shell
 node install.mjs --machine    # ...and the machine layer
 ```
 
-`install.mjs` deploys the checkout it is sitting in, so no flags are needed. It runs on Node
-with builtins only, no dependencies to install first. Useful before committing to it:
+`install.mjs` deploys the checkout it is sitting in, so no flags are needed, and it runs on Node
+builtins alone with nothing to install first. Worth running before it writes anything:
 
 ```bash
 node install.mjs --dry-run    # report every write, perform none
@@ -65,87 +60,65 @@ node install.mjs --selftest   # the installer's own checks
 ```
 
 Every target is backed up to a timestamped `.bak-...` before it is replaced, and files that
-already match are left alone, so a second run is a no-op rather than a pile of backups. The
-machine layer is off by default: the steps above write config files, while that one writes
-the registry and repoints user folders.
-
+already match are left alone, so a second run is a no-op rather than a pile of backups.
 Individual layers can be skipped with `--no-fonts`, `--no-tabby`, `--no-nvim`, `--no-shell`.
 
-### By hand
+### The machine layer
 
-What the installer does, for a machine where running it is not wanted:
+This step is off by default: the ones above write config files, while this one writes the registry
+and repoints user folders. It applies `machine/machine.json`, which is per-machine and not tracked
+here. Copy the example and edit it for the box you are on:
 
-1. **Neovim**: copy or symlink `nvim/` into the Neovim config directory
-   (`%LOCALAPPDATA%\nvim` on Windows, `~/.config/nvim` elsewhere). First launch bootstraps
-   lazy.nvim and installs the pinned plugins. Needs Neovim 0.10 or later; treesitter parsers
-   compile on demand, which needs the `tree-sitter` CLI (0.26 or later) and a C compiler on
-   PATH. On a Windows machine without MSVC the config points `CC` at gcc. Optional tools:
-   `lazygit` for the git float, `ripgrep` for live grep.
+```bash
+cp machine/machine.example.json machine/machine.json
+node install.mjs --machine --dry-run
+```
 
-2. **Fonts**: install `fonts/CozetteVector.ttf` and `fonts/CozetteVectorBold.ttf` per-user,
-   no elevation. Do this before step 3, since the Tabby profile names the font.
+The manifest declares the software the setup needs, what launches at login and with which flag,
+where the user folders live, and which background collection is switched off. Startup entries and
+user folders apply with no elevation. Software is reported as present or missing unless you ask
+for it to be installed, and the privacy changes need administrator rights, so `--privacy` emits a
+script to review and run yourself.
 
-   - **Windows**: copy both files into `%LOCALAPPDATA%\Microsoft\Windows\Fonts`, then add one
-     string value per file under `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts`.
-     The value name is the font's full name plus its format, and the data is the copied
-     file's full path:
+A user folder whose current location still holds files is reported `[BLOCKED]` and left alone
+rather than repointed, since repointing it would strand the data. Move the files first, or pass
+`--force-folders` if you mean it.
 
-     ```
-     CozetteVector (TrueType)      = %LOCALAPPDATA%\Microsoft\Windows\Fonts\CozetteVector.ttf
-     CozetteVectorBold (TrueType)  = %LOCALAPPDATA%\Microsoft\Windows\Fonts\CozetteVectorBold.ttf
-     ```
+## Requirements
 
-     Calling `AddFontResourceW` on each path and broadcasting `WM_FONTCHANGE` makes them
-     usable in the current session without a logout.
-   - **Linux**: copy into `~/.local/share/fonts`, then run `fc-cache -f`.
-   - **macOS**: copy into `~/Library/Fonts`.
+Neovim 0.10 or later, and a `tree-sitter` CLI of 0.26 or later plus a C compiler on PATH, since
+parsers compile on demand. On Windows without MSVC the config points `CC` at gcc. `lazygit` backs
+the git float and `ripgrep` backs live grep. The installer reports every one of these, and
+installs them with `--install-software`.
 
-   Verify with the installed-font list rather than assuming: the two families that must
-   appear are `CozetteVector` and `CozetteVectorBold`.
+## The font
 
-3. **Tabby**: copy `tabby/config.yaml` into Tabby's config directory (`%APPDATA%\tabby` on
-   Windows, `~/.config/tabby` on Linux, `~/Library/Application Support/tabby` on macOS).
-   Tabby holds its config in memory and rewrites the file on exit, so fully quit it (tray
-   icon included, not just the window) before copying, then relaunch. Writing the file while
-   Tabby runs gets silently clobbered on quit.
+Cozette, a 6x13 bitmap font, vendored from `the-moonwitch/Cozette` release v.1.30.0 as
+`CozetteVector.ttf` and `CozetteVectorBold.ttf` and installed per-user with no elevation. It ships
+Nerd Font icon and Powerline glyphs built in, so no separately patched build is needed.
 
-   The font is wired under the `terminal:` block, and the repo copy already carries both
-   keys:
+The profile sets it at `fontSize: 19`. Sizes that land exactly on the pixel grid are 13 and 26;
+everything else renders slightly soft.
 
-   ```yaml
-   terminal:
-     font: CozetteVector
-     fontSize: 19
-   ```
+Two settings in the profile behave differently than they look:
 
-4. **Shell**: copy the files in `shell/` to their homes: `bashrc`, `bash_profile`, `inputrc`,
-   `gitconfig` and `gitignore_global` to `~/.bashrc`, `~/.bash_profile`, `~/.inputrc`,
-   `~/.gitconfig` and `~/.gitignore_global`, and `git-prompt.sh` to `~/.config/git/git-prompt.sh`,
-   which is the path Git for Windows looks for before building its own prompt. Machine-specific
-   settings go in `~/.bashrc.local` and `~/.gitconfig.local`, which are sourced last and are
-   never tracked, so a redeploy cannot overwrite them. `shell/README.md` carries the reasoning.
-
-5. **Machine**: apply `machine/machine.json`, which declares the software that belongs on the
-   box, what launches at login and with which flag, where the user folders live, and which
-   background collection is off. Startup entries and user folders apply with no elevation.
-   Software is only reported as present or missing unless you ask for it to be installed, and
-   the privacy changes need administrator rights so they are emitted as a script to review and
-   run yourself. `machine/README.md` carries the reasoning, including the manual OneDrive
-   removal sequence that is deliberately never automated.
-
-Every target applies from whatever the files currently hold, never a baked-in snapshot.
-
-## Font notes
-
-- Cozette ships Nerd Font icon and Powerline glyphs built in, so no separately patched Nerd
-  Font build is needed. Vendored from `the-moonwitch/Cozette` release v.1.30.0.
 - `CozetteVectorBold` registers under its own family name rather than as the bold face of
-  `CozetteVector`, so nothing pairs them automatically and Tabby synthesizes bold instead.
-  The profile pins `fontWeightBold: 600` and keeps that synthesis. Dropping it to `400` is
-  what turns the synthesis off, by asking for bold text at the one weight the family
-  actually has.
-- `fontSize: 19` is a baked-in zoom level. Tabby scales zoom by `1.1^steps` and never persists
-  it, so pinning the size is the only way to make it survive a restart, and it moves what
-  `reset-zoom` (Ctrl+0) returns to.
-- Cozette is a 6x13 bitmap font and these TTFs are the outline conversion, so 13 and 26 are
-  the only sizes that land exactly on its pixel grid. Everything else renders slightly soft.
+  `CozetteVector`, so nothing pairs them and Tabby synthesizes bold instead. `fontWeightBold: 600`
+  keeps that synthesis. Dropping it to `400` turns it off, by asking for bold at the one weight
+  the family actually has.
+- `fontSize` is a baked-in zoom level. Tabby scales zoom by `1.1^steps` and never persists it, so
+  pinning the size is the only way to survive a restart, and changing it moves what `reset-zoom`
+  (Ctrl+0) returns to.
+
+### Optional faces
+
+`fonts/optional/` carries faces that belong on the machine but are no part of the setup, so they
+travel with the repo and install only when asked for:
+
+```bash
+node install.mjs --optional-fonts
+```
+
+A default run never touches them. They register per-user with no elevation, the same as the
+terminal font, and `--list` shows them separately so a face you have not asked for does not read
+as one the installer failed to install.

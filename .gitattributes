@@ -1,3 +1,7 @@
+# Git for Windows defaults core.autocrlf to true, and bash refuses to run a script with CRLF
+# endings. Without this line a clone hands the installer a .bashrc full of \r and every login
+# opens on a wall of `$'\r': command not found`, which is what would make the shell files in
+# this repo unsafe to track at all.
 * text=auto eol=lf
 
 # Vendored font binaries: never line-ending normalized

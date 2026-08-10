@@ -6,3 +6,14 @@ tabby/*
 *.bak
 *.backup
 *.bak-*
+
+# This repo is public, and a real manifest lists what is installed, what launches at login and
+# where the user folders live. Only machine.example.json, the shape, is tracked.
+machine/machine.json
+
+# Per-machine notes, same reasoning. Ignored as a class so a new one cannot be added by accident.
+*.local.md
+
+# Agent working state. Also covered by the deployed global ignore, repeated here so the repo
+# does not depend on the shell layer having been deployed first.
+.claude/

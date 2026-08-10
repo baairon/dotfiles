@@ -10,6 +10,14 @@ const PLATFORM = process.platform;
 
 const DOTFILES_REPO = 'https://github.com/baairon/dotfiles';
 
+// Two rules for working here, neither of which belongs to any single line below.
+//
+//   1. Nothing tracked in this repo may name what is installed on a particular machine. It is
+//      public. Comments and test fixtures use invented placeholders; the real manifest is
+//      machine/machine.json and is gitignored, and machine/machine.example.json is the tracked
+//      shape, carrying only the toolchain this repo itself needs.
+//   2. Run `--dry-run` and `--selftest` before proposing a change.
+
 // This file ships inside the repo it deploys, so `git clone && node install.mjs` has to
 // work with no flags at all. The folders it looks for are the deploy sources, not just any
 // directory: a copy of this script sitting somewhere else finds nothing and falls through
@@ -138,9 +146,15 @@ function resolveRepo(opts) {
 
 // Windows registers a font under its full name plus format. The vendored files are
 // named after the family they register as (CozetteVector.ttf -> "CozetteVector"), so
-// the base name is the value name and the TTF name table never has to be parsed.
+// the base name is the value name and the name table never has to be parsed.
+//
+// The format suffix is not decorative: Windows keys on it, and an OpenType file
+// registered as "(TrueType)" is the one way to get a value that looks correct in the
+// registry while the font never appears in an application's font list.
 function fontRegistryName(file) {
-  return `${path.basename(file, path.extname(file))} (TrueType)`;
+  const ext = path.extname(file);
+  const format = /^\.otf$/i.test(ext) ? 'OpenType' : 'TrueType';
+  return `${path.basename(file, ext)} (${format})`;
 }
 
 function psQuote(s) {
@@ -164,11 +178,29 @@ function activateFontsWindows(dests) {
   execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'pipe' });
 }
 
+// fonts/ holds the one the terminal profile names, so it is always deployed. fonts/optional/
+// holds faces that are kept here to travel with the machine but are not part of the setup, so
+// they install only when asked for. Keeping them in a subfolder rather than behind a filename
+// convention is what makes the default set impossible to widen by accident.
+function fontSources(repoDir, opts) {
+  const src = path.join(repoDir, 'fonts');
+  if (!isDir(src)) return null;
+  const pick = (dir, re) => (isDir(dir) ? fs.readdirSync(dir).filter((f) => re.test(f)).sort() : []);
+
+  const rows = pick(src, /\.ttf$/i).map((name) => ({ name, from: path.join(src, name) }));
+  if (opts.optionalFonts) {
+    const optDir = path.join(src, 'optional');
+    for (const name of pick(optDir, /\.(ttf|otf)$/i)) rows.push({ name, from: path.join(optDir, name) });
+  }
+  return rows;
+}
+
 function deployFonts(repoDir, opts) {
   const src = path.join(repoDir, 'fonts');
-  if (!isDir(src)) return { ok: false, msg: `repo has no fonts/ folder (${src})` };
-  const files = fs.readdirSync(src).filter((f) => /\.ttf$/i.test(f)).sort();
-  if (!files.length) return { ok: false, msg: `no .ttf files in ${src}` };
+  const rows = fontSources(repoDir, opts);
+  if (!rows) return { ok: false, msg: `repo has no fonts/ folder (${src})` };
+  if (!rows.length) return { ok: false, msg: `no font files in ${src}` };
+  const files = rows.map((r) => r.name);
 
   if (opts.dryRun) {
     return { ok: true, msg: `would install ${files.length} font(s) into ${FONTS_DIR}: ${files.join(', ')}` };
@@ -180,8 +212,7 @@ function deployFonts(repoDir, opts) {
   const unchanged = [];
   let backup = null;
 
-  for (const f of files) {
-    const from = path.join(src, f);
+  for (const { name: f, from } of rows) {
     const dest = path.join(FONTS_DIR, f);
     dests.push(dest);
     // A registered font file is usually open, and rewriting identical bytes would
@@ -274,7 +305,7 @@ function deployNvim(repoDir, opts) {
 // Repo file -> absolute destination, every one of them under $HOME. The prompt is the odd
 // entry: ~/.config/git/git-prompt.sh is the path Git for Windows itself looks for before
 // building its own PS1, so deploying there is taking a documented hook rather than
-// overriding anything. See shell/README.md.
+// overriding anything. shell/git-prompt.sh explains what that hook has to do in return.
 function shellTargets() {
   return [
     { src: 'bashrc', dest: path.join(HOME, '.bashrc') },
@@ -394,9 +425,19 @@ function readManifest(repoDir) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+// machine.json is gitignored, so a fresh clone has none. The tracked example still carries the
+// toolchain this repo needs, which is enough to answer "what should I install" even though it is
+// never enough to APPLY: deploying generic entries to a real machine would be wrong. Read it only
+// where the answer is an install hint.
+function readExampleManifest(repoDir) {
+  const file = path.join(repoDir, 'machine', 'machine.example.json');
+  if (!exists(file)) return null;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
 // Expand %VAR% against the environment. The name pattern deliberately requires a
-// non-digit first character so URL escapes survive: Proton VPN's startup argument
-// contains "Proton%20VPN", and a looser pattern would eat the %20 as a variable.
+// non-digit first character so URL escapes survive: some startup arguments carry a
+// URL-encoded app name like "%20", and a looser pattern would eat it as a variable.
 function expandEnv(s) {
   return String(s).replace(/%([A-Za-z_][A-Za-z0-9_()]*)%/g, (whole, name) => {
     const key = Object.keys(process.env).find((k) => k.toLowerCase() === name.toLowerCase());
@@ -405,16 +446,17 @@ function expandEnv(s) {
 }
 
 // Startup entry names are matched by prefix when they end in '*', because Windows
-// gives Edge and Copilot a per-machine hex suffix that differs on every box.
+// gives some of its own auto-launch entries a per-machine hex suffix that differs
+// on every box.
 function matchesPattern(pattern, name) {
   if (!pattern.endsWith('*')) return pattern === name;
   return name.startsWith(pattern.slice(0, -1));
 }
 
-// Most entries compose cleanly as "exe" arg arg. A few cannot: Proton VPN's launcher is
-// registered with the exe UNQUOTED and its ms-protocol argument QUOTED, and that argument
-// contains & and ?, so re-composing it in the usual shape would change how the shell parses
-// it. Those entries carry an explicit `command` and are written through verbatim.
+// Most entries compose cleanly as "exe" arg arg. A few cannot: some installers register the
+// exe UNQUOTED with an ms-protocol argument QUOTED, and that argument contains & and ?, so
+// re-composing it in the usual shape would change how the shell parses it. Those entries
+// carry an explicit `command` and are written through verbatim.
 function runCommandFor(entry) {
   if (entry.command) return expandEnv(entry.command);
   const exe = expandEnv(entry.exe);
@@ -508,17 +550,17 @@ function softwareStatus(manifest) {
     // `npm i -g` are both absent from `winget list` while sitting right there on PATH, and
     // reporting those as MISSING would be the installer lying about the machine it is on.
     if (s.detectOnPath && onPath(s.detectOnPath)) return { ...s, installed: true };
-    // detectPath is the same idea for something that is not on PATH at all: G-Helper is a
-    // portable exe dropped into the Startup folder.
+    // detectPath is the same idea for something that is not on PATH at all, such as a
+    // portable exe dropped straight into the Startup folder.
     if (s.detectPath && exists(expandEnv(s.detectPath))) return { ...s, installed: true };
     return { ...s, installed: wingetHas(s.winget) };
   });
 }
 
 // Substring-matching the whole `winget list` table does not work: packages winget cannot
-// correlate to its catalog are listed under an ARP identifier (ARP\User\X64\Discord) rather
-// than their catalog id, so Discord and Neovim both read as missing while installed. An
-// exact per-id query is authoritative; exit 0 means installed.
+// correlate to its catalog are listed under an ARP identifier (`ARP\User\X64\<name>`) rather
+// than their catalog id, so they read as missing while installed. An exact per-id query is
+// authoritative; exit 0 means installed.
 const _wingetSeen = new Map(); // one subprocess per id per run, not per call site
 function wingetHas(id) {
   if (!onPath('winget')) return null; // unknown rather than false
@@ -593,7 +635,7 @@ function countFiles(dir, cap = 5000) {
 }
 
 // A known folder that currently points somewhere else, at a location that still holds files,
-// is the OneDrive case: repointing it silently strands the data. Refuse rather than orphan.
+// is the cloud-sync case: repointing it silently strands the data. Refuse rather than orphan.
 function folderBlocked(current, resolved) {
   if (!current) return null;
   const cur = expandEnv(current);
@@ -715,7 +757,11 @@ function installSoftware(manifest, opts, lines) {
 
 function deployMachine(repoDir, opts) {
   const manifest = readManifest(repoDir);
-  if (!manifest) return { ok: false, msg: `repo has no machine/machine.json (${machineManifestPath(repoDir)})` };
+  if (!manifest) {
+    // The real manifest is per-machine and untracked, so a fresh clone genuinely has none.
+    // Say what to do about it rather than reporting a bare absence.
+    return { ok: false, msg: `no machine/machine.json (${machineManifestPath(repoDir)})\n  copy machine/machine.example.json to machine/machine.json and edit it for this machine` };
+  }
   if (PLATFORM !== 'win32') return { ok: false, msg: `machine layer is Windows-only (running on ${PLATFORM})` };
 
   const lines = [];
@@ -752,6 +798,7 @@ function parseArgs(argv) {
     dryRun: false, list: false, help: false, selftest: false,
     fonts: true, tabby: true, nvim: true, shell: true, machine: false,
     installSoftware: false, privacy: false, forceFolders: false, repo: null,
+    optionalFonts: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -759,6 +806,7 @@ function parseArgs(argv) {
     else if (a === '--list') opts.list = true;
     else if (a === '--selftest') opts.selftest = true;
     else if (a === '--no-fonts') opts.fonts = false;
+    else if (a === '--optional-fonts') opts.optionalFonts = true;
     else if (a === '--no-tabby') opts.tabby = false;
     else if (a === '--no-nvim') opts.nvim = false;
     else if (a === '--no-shell') opts.shell = false;
@@ -787,6 +835,7 @@ Options:
   --dry-run           Report what would happen; write nothing to your configs.
   --list              List repo source, deploy targets, and prerequisites, then exit.
   --no-fonts          Skip the vendored terminal font.
+  --optional-fonts    Also install fonts/optional/ (never installed otherwise).
   --no-tabby          Skip the terminal (Tabby) config.
   --no-nvim           Skip the editor (Neovim) config.
   --no-shell          Skip the shell layer (bash, readline, git).
@@ -810,7 +859,8 @@ function printList(opts) {
   console.log('Deploy targets:');
   console.log(`  [${isDir(FONTS_DIR) ? 'present' : 'absent '}] fonts : ${FONTS_DIR}`);
   for (const f of fontStatus(opts)) {
-    console.log(`      [${f.installed ? 'installed' : 'missing  '}] ${f.name}`);
+    const state = f.installed ? 'installed' : (f.optional ? 'not asked' : 'missing  ');
+    console.log(`      [${state}] ${f.name}${f.optional ? '   (optional)' : ''}`);
   }
   console.log(`  [${exists(TABBY_CONFIG) ? 'present' : 'absent '}] tabby : ${TABBY_CONFIG}`);
   console.log(`  [${isDir(NVIM_DIR) ? 'present' : 'absent '}] nvim  : ${NVIM_DIR}`);
@@ -822,20 +872,22 @@ function printList(opts) {
   printPrerequisites(opts);
 }
 
-// Prerequisites come from the manifest, never from string literals here. A package id
-// written in code has nothing to be checked against, which is how `TreeSitter.TreeSitter`
-// (a package that does not exist) sat in this function printing an install command that
-// could only ever fail. machine/machine.json is now the one place an id is allowed to live.
+// Prerequisites come from a manifest, never from string literals here. A package id written in
+// code has nothing to be checked against, which is how `TreeSitter.TreeSitter` (a package that
+// does not exist) sat in this function printing an install command that could only ever fail.
+// The machine's own manifest wins; the tracked example is the fallback, so a fresh clone still
+// prints real install commands instead of degrading to a bare present/missing list.
 function printPrerequisites(opts) {
   const checkout = listCheckout(opts);
   let manifest = null;
   try { manifest = readManifest(checkout); } catch { /* unreadable: fall through */ }
+  if (!manifest) manifest = readExampleManifest(checkout);
   const rows = (manifest?.software || []).filter((s) => s.prerequisite);
 
   console.log('Prerequisites (never auto-installed):');
   if (!rows.length) {
-    // No manifest on disk yet. Report what is here, but do not invent an install command:
-    // the ids live in the checkout, and guessing one is the exact mistake this replaces.
+    // No checkout at all. Report what is here, but do not invent an install command: the ids
+    // live in the checkout, and guessing one is the exact mistake this replaces.
     for (const bin of ['git', 'node', 'nvim']) {
       console.log(`  ${bin.padEnd(12)}: ${onPath(bin) ? 'present' : 'MISSING'}`);
     }
@@ -858,6 +910,7 @@ function printMachineList(opts) {
   try { manifest = readManifest(checkout); } catch { /* unreadable: treated as absent */ }
   if (!manifest) {
     console.log('Machine layer: no machine/machine.json in the checkout on disk');
+    console.log('  (copy machine/machine.example.json to machine/machine.json to declare one)');
     console.log('');
     return;
   }
@@ -900,14 +953,20 @@ function printMachineList(opts) {
 // --list must not clone, so the font names come from whichever checkout is already on
 // disk (an explicit --repo, else the cache). With neither, only the dir row is shown:
 // the repo is what says which fonts belong, never the OS font dir's own contents.
+// Reports both groups regardless of --optional-fonts, because the question --list answers is
+// what is on the machine, not what this run would deploy. The optional rows are labelled so a
+// missing one does not read as something the setup failed to do.
 function fontStatus(opts) {
   const checkout = listCheckout(opts);
-  const fromRepo = path.join(checkout, 'fonts');
-  if (!isDir(fromRepo)) return [];
-  return fs.readdirSync(fromRepo)
-    .filter((f) => /\.ttf$/i.test(f))
-    .sort()
-    .map((name) => ({ name, installed: exists(path.join(FONTS_DIR, name)) }));
+  const required = fontSources(checkout, { optionalFonts: false });
+  if (!required) return [];
+  const all = fontSources(checkout, { optionalFonts: true }) || [];
+  const requiredNames = new Set(required.map((r) => r.name));
+  return all.map((r) => ({
+    name: r.name,
+    optional: !requiredNames.has(r.name),
+    installed: exists(path.join(FONTS_DIR, r.name)),
+  }));
 }
 
 function selftest() {
@@ -921,7 +980,28 @@ function selftest() {
     ? /Microsoft[/\\]Windows[/\\]Fonts$/.test(FONTS_DIR)
     : /[/\\][Ff]onts$/.test(FONTS_DIR));
   check('fonts dir is absolute', path.isAbsolute(FONTS_DIR));
+
+  // The whole point of fonts/optional/ is that a default run cannot reach it. Assert both
+  // halves against the real checkout: the default set excludes it, and asking includes it.
+  const fontCheckout = listCheckout({});
+  if (isDir(path.join(fontCheckout, 'fonts', 'optional'))) {
+    const req = fontSources(fontCheckout, { optionalFonts: false }) || [];
+    const all = fontSources(fontCheckout, { optionalFonts: true }) || [];
+    check('the default font set is only the top-level fonts/',
+      req.every((r) => path.dirname(r.from).endsWith('fonts')));
+    check('the default font set skips fonts/optional/', all.length > req.length);
+    check('--optional-fonts picks up otf as well as ttf',
+      all.some((r) => /\.otf$/i.test(r.name)));
+    check('every optional font resolves to a file that exists', all.every((r) => exists(r.from)));
+    check('no optional font shadows a required one',
+      new Set(all.map((r) => r.name)).size === all.length);
+  }
   check('registry value name is family + format', fontRegistryName('a/b/CozetteVector.ttf') === 'CozetteVector (TrueType)');
+  // An .otf registered as (TrueType) writes a value that looks right and never shows up in a
+  // font list, so the suffix is checked rather than assumed.
+  check('an otf registers as OpenType', fontRegistryName('a/b/BruneaMono.otf') === 'BruneaMono (OpenType)');
+  check('format check is extension-case insensitive', fontRegistryName('X.OTF') === 'X (OpenType)');
+  check('a spaced filename keeps its spaces', fontRegistryName('a/b/Basic TM.ttf') === 'Basic TM (TrueType)');
   check('registry value name drops the dir', !fontRegistryName(path.join(FONTS_DIR, 'CozetteVectorBold.ttf')).includes(path.sep));
   check('psQuote wraps in single quotes', psQuote('C:\\a b\\f.ttf') === "'C:\\a b\\f.ttf'");
   check('psQuote doubles embedded quotes', psQuote("it's") === "'it''s'");
@@ -930,22 +1010,22 @@ function selftest() {
   check('onPath finds node', onPath('node') === true);
   check('onPath rejects bogus', onPath('definitely-not-a-real-bin-xyz') === false);
 
-  // Machine layer. The %20 case is the one that matters: Proton VPN's startup argument
-  // carries a URL escape, and a looser pattern would silently corrupt the command.
+  // Machine layer. The %20 case is the one that matters: a startup argument carrying a
+  // URL escape must survive expansion, or a looser pattern silently corrupts the command.
   process.env.__DOTFILES_SELFTEST = 'XYZ';
   process.env.__DOTFILES_CMD__ = 'C:\\pf';
   check('expandEnv expands a known var', expandEnv('a/%__DOTFILES_SELFTEST%/b') === 'a/XYZ/b');
   check('expandEnv is case-insensitive', expandEnv('%__dotfiles_selftest%') === 'XYZ');
   check('expandEnv leaves unknown vars alone', expandEnv('%__NOT_A_REAL_VAR__%') === '%__NOT_A_REAL_VAR__%');
-  check('expandEnv does not eat URL escapes', expandEnv('TaskId=Proton%20VPN') === 'TaskId=Proton%20VPN');
+  check('expandEnv does not eat URL escapes', expandEnv('TaskId=Example%20App') === 'TaskId=Example%20App');
   check('expandEnv survives a mixed string',
     expandEnv('%__DOTFILES_SELFTEST%?a=b%20c') === 'XYZ?a=b%20c');
   delete process.env.__DOTFILES_SELFTEST;
 
-  check('matchesPattern exact hit', matchesPattern('Discord', 'Discord') === true);
-  check('matchesPattern exact miss', matchesPattern('Discord', 'Discord2') === false);
-  check('matchesPattern prefix hit', matchesPattern('MicrosoftEdgeAutoLaunch_*', 'MicrosoftEdgeAutoLaunch_0A14') === true);
-  check('matchesPattern prefix miss', matchesPattern('MicrosoftEdgeAutoLaunch_*', 'SomethingElse') === false);
+  check('matchesPattern exact hit', matchesPattern('ExampleApp', 'ExampleApp') === true);
+  check('matchesPattern exact miss', matchesPattern('ExampleApp', 'ExampleApp2') === false);
+  check('matchesPattern prefix hit', matchesPattern('ExampleAutoLaunch_*', 'ExampleAutoLaunch_0A14') === true);
+  check('matchesPattern prefix miss', matchesPattern('ExampleAutoLaunch_*', 'SomethingElse') === false);
 
   check('startupApproved enabled byte', startupApprovedBytes(true).startsWith('02'));
   check('startupApproved disabled byte', startupApprovedBytes(false).startsWith('03'));
@@ -960,8 +1040,9 @@ function selftest() {
 
   check('runCommandFor quotes the exe', runCommandFor({ exe: 'C:\\a b\\x.exe', args: [] }) === '"C:\\a b\\x.exe"');
   check('runCommandFor appends args', runCommandFor({ exe: 'x.exe', args: ['--hidden'] }) === '"x.exe" --hidden');
-  // Regression guard: a verbatim `command` must win over exe+args composition, or Proton
-  // VPN's launcher gets rewritten into a shape that parses differently.
+  // Regression guard: a verbatim `command` must win over exe+args composition, or a launcher
+  // registered exe-unquoted with a quoted argument gets rewritten into a shape that parses
+  // differently.
   check('runCommandFor honours a verbatim command',
     runCommandFor({ exe: 'x.exe', args: ['--nope'], command: 'y.exe "a&b?c"' }) === 'y.exe "a&b?c"');
   check('runCommandFor expands vars inside a verbatim command',
@@ -969,7 +1050,7 @@ function selftest() {
   delete process.env.__DOTFILES_CMD__;
 
   // Drift detection. An empty or matching current path must never block; a different path
-  // holding files always must, or the OneDrive case orphans data silently.
+  // holding files always must, or the cloud-sync case orphans data silently.
   const dTmp = path.join(os.tmpdir(), `dotfiles-drift-${safeTimestamp()}`);
   try {
     const withData = path.join(dTmp, 'old');
@@ -1044,6 +1125,42 @@ function selftest() {
   const selfSrc = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
   check('no package id is hardcoded in this file',
     (selfSrc.match(/winget install (?!\$\{)[A-Za-z]/g) || []).length === 0);
+
+  // The example is the only manifest this repo tracks, so it is the only one guaranteed to be
+  // in a clone. If it stops parsing or drifts out of shape, a fresh machine has nothing to copy.
+  const exampleFile = path.join(listCheckout({}), 'machine', 'machine.example.json');
+  if (exists(exampleFile)) {
+    let ex = null;
+    try { ex = JSON.parse(fs.readFileSync(exampleFile, 'utf8')); } catch { /* reported below */ }
+    check('machine.example.json parses', ex !== null);
+    if (ex) {
+      const exs = ex.software || [];
+      check('example declares software', exs.length > 0);
+      check('example ids have Publisher.Package shape',
+        exs.every((s) => /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/.test(s.winget || '')));
+      check('example entries explain themselves', exs.every((s) => typeof s.why === 'string' && s.why.length > 10));
+      check('example declares the two the installer cannot bootstrap',
+        exs.some((s) => s.detectOnPath === 'node') && exs.some((s) => s.detectOnPath === 'git'));
+
+      // bootstrap.ps1 may run before any checkout exists, so it carries two ids as constants.
+      // That is the only place in the repo an id is written in code, and it is only safe while
+      // it agrees with the manifest. Nothing else compares the two files, so this does.
+      const bootstrapFile = path.join(listCheckout({}), 'bootstrap.ps1');
+      if (exists(bootstrapFile)) {
+        const ps = fs.readFileSync(bootstrapFile, 'utf8');
+        const block = ps.match(/\$FallbackIds\s*=\s*@\{([^}]*)\}/);
+        check('bootstrap.ps1 declares fallback ids', block !== null);
+        if (block) {
+          for (const bin of ['git', 'node']) {
+            const hit = block[1].match(new RegExp(`${bin}\\s*=\\s*'([^']+)'`));
+            const declared = exs.find((s) => s.detectOnPath === bin);
+            check(`bootstrap ${bin} fallback matches the example manifest`,
+              !!hit && !!declared && hit[1] === declared.winget);
+          }
+        }
+      }
+    }
+  }
 
   let mf = null;
   try { mf = readManifest(listCheckout({})); } catch { /* no checkout: skip these */ }
@@ -1123,7 +1240,7 @@ function main() {
   const state = { hadError: false };
   // Fonts first: the Tabby profile names CozetteVector, so it has to exist by the time
   // that config lands, and nvim's splash/gitstat panels draw glyphs only Cozette carries.
-  if (opts.fonts) deployStep('Font (Cozette)', deployFonts, repo.dir, opts, state);
+  if (opts.fonts) deployStep(opts.optionalFonts ? 'Fonts (Cozette + optional)' : 'Font (Cozette)', deployFonts, repo.dir, opts, state);
   if (opts.tabby) deployStep('Terminal (Tabby)', deployTabby, repo.dir, opts, state);
   if (opts.nvim) deployStep('Editor (Neovim)', deployNvim, repo.dir, opts, state);
   // Shell after the editor, because ~/.bashrc exports EDITOR=nvim and the git config it

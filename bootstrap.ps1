@@ -10,7 +10,7 @@
 
     Its scope stops there on purpose. It installs the two tools needed to run the installer
     and nothing else; the wider software list belongs to `install.mjs --machine
-    --install-software`, which reads it from machine/machine.json.
+    --install-software`, which reads it from that machine's own manifest.
 
 .PARAMETER DryRun
     Report every step and change nothing.
@@ -39,11 +39,15 @@ $ErrorActionPreference = 'Stop'
 
 $RepoUrl = 'https://github.com/baairon/dotfiles'
 
-# Package ids are NOT written here. They live in machine/machine.json, which is the only
-# place in this repo allowed to name one, and every id there is verified against winget.
-# This script needs two of them before that file can be read, so it looks them up by the
-# binary it is trying to provide once a checkout exists, and only falls back to a constant
-# when there is no checkout yet to read.
+# Package ids come from a manifest, looked up by the binary they provide. machine.json is a
+# machine's own and is gitignored, so a fresh clone will not have it; machine.example.json is
+# tracked and therefore always present, and it carries git and node for exactly this reason.
+$ManifestNames = @('machine\machine.json', 'machine\machine.example.json')
+
+# The one case a manifest cannot cover: this script may run before any checkout exists, with
+# nothing to read. These two constants are the escape hatch for that, and the only ids written
+# in code anywhere in this repo. They are checked against the manifest by install.mjs once a
+# checkout is on disk, so a drift between them surfaces rather than sitting here unnoticed.
 $FallbackIds = @{ git = 'Git.Git'; node = 'OpenJS.NodeJS.LTS' }
 
 function Write-Step {
@@ -77,15 +81,16 @@ function Get-PackageId {
     param([string] $Binary, [string] $Checkout)
 
     if ($Checkout) {
-        $manifestPath = Join-Path $Checkout 'machine\machine.json'
-        if (Test-Path $manifestPath) {
+        foreach ($name in $ManifestNames) {
+            $manifestPath = Join-Path $Checkout $name
+            if (-not (Test-Path $manifestPath)) { continue }
             try {
                 $manifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
                 foreach ($entry in $manifest.software) {
                     if ($entry.detectOnPath -eq $Binary) { return $entry.winget }
                 }
             } catch {
-                Write-Host "    manifest unreadable, using the built-in id: $($_.Exception.Message)"
+                Write-Host "    $name unreadable, trying the next source: $($_.Exception.Message)"
             }
         }
     }

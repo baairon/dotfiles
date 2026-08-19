@@ -47,11 +47,20 @@ jobs:
   lua:
     name: lua parses
     runs-on: ubuntu-latest
+    # A blocked runner should fail in minutes, not sit on the default six-hour limit.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
+      # The runner boots with its own apt jobs still holding the dpkg and lists locks, and
+      # apt waits on them forever by default while -qq hides the reason. Bound the wait so a
+      # lost race is a fast error instead of a hung job.
       - name: install luajit
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq luajit
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o DPkg::Lock::Timeout=300 update -qq
+          sudo apt-get -o DPkg::Lock::Timeout=300 install -y -qq luajit
 
       # -b compiles without running, so a config that would only fail at editor start-up
       # fails here instead. No style opinions, syntax only.

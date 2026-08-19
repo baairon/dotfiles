@@ -37,6 +37,15 @@ o.guicursor:append('a:blinkon0')
 o.shortmess:append('I')
 o.fillchars:append({ eob = ' ', diff = ' ' })
 
+-- linematch is the one that makes a diff read the way an editor's does: without it a
+-- changed block is highlighted whole, with it the lines inside the block are paired up so
+-- the red and green land only on what actually differs. `vertical` makes side-by-side the
+-- default for every diffthis in this config, the changes panel and gitsigns alike.
+o.diffopt = {
+  'internal', 'filler', 'closeoff', 'vertical',
+  'algorithm:histogram', 'indent-heuristic', 'linematch:60',
+}
+
 o.laststatus = 3
 
 if vim.fn.has('win32') == 1 and vim.fn.executable('cmd.exe') == 1 then

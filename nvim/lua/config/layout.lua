@@ -197,40 +197,200 @@ function M.lazygit_float()
   vim.cmd('startinsert')
 end
 
-local function bash_squote(s)
-  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+-- --- diff panel --------------------------------------------------------------------------
+-- One file's changes as a single unified panel, opened as an ordinary tab in the top panel,
+-- so <A-w> closes it in one press like every other tab and the tree, the git rail and the
+-- changes panel all stay where they are. Neither obvious tool fits that shape: diffview
+-- claims a whole tabpage, and nvim's own diff mode needs a second window to diff against.
+-- So the hunks are painted here, the way gitstat paints its rows.
+local DIFF_PREFIX = 'git://diff/'
+local diff_ns = vim.api.nvim_create_namespace('workspace_diff')
+local diff_bufs = {}
+
+local function git_diff_argv(relpath, is_new, root)
+  if is_new then
+    -- nothing in the index to compare against, so diff the file against the empty blob and
+    -- every line reads as added
+    return { 'git', '-C', root, 'diff', '--no-color', '--no-index', '--', '/dev/null', relpath }
+  end
+  return { 'git', '-C', root, 'diff', '--no-color', '--', relpath }
 end
 
--- open `git diff` for one file as a new terminal tab in the top panel
-function M.open_git_diff_tab(relpath, is_new, root)
+local function render_diff(buf, relpath, out)
+  local body, spans = {}, {}
+  local adds, dels = 0, 0
+  local started = false
+  local OFFSET = 2 -- the title line, and the blank one under it
+
+  local function mark(hl, eol)
+    spans[#spans + 1] = { #body - 1 + OFFSET, hl, eol }
+  end
+
+  -- git's file header (diff --git, index, ---, +++) says nothing a one-file view does not
+  -- already say in its title, so the render starts at the first hunk marker
+  for _, raw in ipairs(vim.split(out, '\n', { plain = true })) do
+    local line = (raw:gsub('\r$', ''))
+    if line:sub(1, 2) == '@@' then
+      started = true
+      body[#body + 1] = line
+      mark('WorkspaceDiffHunk', false)
+    elseif started then
+      body[#body + 1] = line
+      local c = line:sub(1, 1)
+      if c == '+' then
+        adds = adds + 1
+        mark('WorkspaceDiffAddBg', true)
+      elseif c == '-' then
+        dels = dels + 1
+        mark('WorkspaceDiffDelBg', true)
+      elseif c == '\\' then
+        mark('WorkspaceDiffDim', false) -- "\ No newline at end of file"
+      end
+    end
+  end
+  -- context lines always carry a leading space, so an empty entry can only be the trailing
+  -- one split leaves behind, and it never owns a span
+  while #body > 0 and body[#body] == '' do body[#body] = nil end
+
+  if #body == 0 then
+    body[1] = ' nothing to show, this file matches the index'
+    spans[#spans + 1] = { OFFSET, 'WorkspaceDiffDim', false }
+  end
+
+  local segs = {
+    { ' ' .. relpath, 'WorkspaceDiffDim' },
+    { '   ' },
+    { '+' .. adds, 'WorkspaceDiffAdd' },
+    { ' ' },
+    { '-' .. dels, 'WorkspaceDiffDel' },
+  }
+  local title, tspans, col = '', {}, 0
+  for _, s in ipairs(segs) do
+    if s[2] then tspans[#tspans + 1] = { col, col + #s[1], s[2] } end
+    title = title .. s[1]
+    col = col + #s[1]
+  end
+
+  local lines = { title, '' }
+  for _, l in ipairs(body) do lines[#lines + 1] = l end
+  -- a trailing line the render never marks, so a block on the last hunk line always has a
+  -- row below it to extend its highlight into
+  lines[#lines + 1] = ''
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  vim.api.nvim_buf_clear_namespace(buf, diff_ns, 0, -1)
+  for _, t in ipairs(tspans) do
+    pcall(vim.api.nvim_buf_set_extmark, buf, diff_ns, 0, t[1],
+      { end_col = t[2], hl_group = t[3] })
+  end
+  for _, s in ipairs(spans) do
+    local row, hl, eol = s[1], s[2], s[3]
+    local opts
+    if eol then
+      -- an added or removed line reads as a block only if its colour runs the full width of
+      -- the panel, which takes a highlight that crosses the end of the line
+      opts = { end_row = row + 1, end_col = 0, hl_group = hl, hl_eol = true }
+    else
+      opts = { end_col = #(lines[row + 1] or ''), hl_group = hl }
+    end
+    pcall(vim.api.nvim_buf_set_extmark, buf, diff_ns, row, 0, opts)
+  end
+end
+
+local function diff_buf(relpath, root, is_new)
+  local b = diff_bufs[relpath]
+  if not (b and vim.api.nvim_buf_is_valid(b)) then
+    b = vim.api.nvim_create_buf(false, true)
+    vim.bo[b].buftype = 'nofile'
+    vim.bo[b].bufhidden = 'hide'
+    vim.bo[b].swapfile = false
+    -- the name is what build_winbar reads for the tab label and its devicon, so this shows
+    -- up as an ordinary-looking file tab; workspace_panel is what files it under the panel
+    pcall(vim.api.nvim_buf_set_name, b, DIFF_PREFIX .. relpath)
+    vim.bo[b].filetype = 'diff'
+    vim.b[b].workspace_panel = 'top'
+    vim.keymap.set('n', 'q', function() require('config.layout')._close_tab() end,
+      { buffer = b, desc = 'Close diff' })
+    diff_bufs[relpath] = b
+  end
+  vim.b[b].workspace_diff = { rel = relpath, root = root, new = is_new }
+  return b
+end
+
+function M.open_file_diff(relpath, is_new, root)
   if not relpath or relpath == '' then return end
   if not root or root == '' then root = vim.fn.getcwd() end
   local top = M.editor_winid()
   if top == 0 or not vim.api.nvim_win_is_valid(top) then
     top = vim.api.nvim_get_current_win()
   end
-  vim.api.nvim_set_current_win(top)
 
-  -- --color=always forces the red/green even through a pager or when git's color.ui is off;
-  -- git's default pager (less) already carries -R via LESS=FRX, so the color survives.
-  local diff
-  if is_new then
-    diff = 'git -C ' .. bash_squote(root) .. ' diff --color=always --no-index -- /dev/null ' .. bash_squote(relpath)
-  else
-    diff = 'git -C ' .. bash_squote(root) .. ' diff --color=always -- ' .. bash_squote(relpath)
-  end
-
-  local bash = git_bash()
-  local argv
-  if type(bash) == 'table' then
-    argv = { bash[1], '--login', '-i', '-c', diff .. '; exec bash --login -i' }
-  else
-    argv = bash
-  end
-  spawn_term(argv, 'top')
-  vim.b.workspace_cmd = relpath
-  refresh_winbars()
+  vim.system(git_diff_argv(relpath, is_new, root), { text = true }, function(res)
+    vim.schedule(function()
+      if not vim.api.nvim_win_is_valid(top) then return end
+      local out = res.stdout or ''
+      -- --no-index exits 1 whenever the two files differ, which is every interesting case
+      -- here, so the only status worth reporting is one that also produced no diff
+      if out == '' and res.code ~= 0 then
+        vim.notify(((res.stderr or 'git diff failed'):gsub('%s+$', '')), vim.log.levels.WARN)
+        return
+      end
+      if out:find('\0', 1, true) then
+        vim.notify(relpath .. ' is binary, nothing to show', vim.log.levels.INFO)
+        return
+      end
+      local buf = diff_buf(relpath, root, is_new)
+      render_diff(buf, relpath, out)
+      vim.api.nvim_win_set_buf(top, buf)
+      vim.api.nvim_set_current_win(top)
+      refresh_winbars()
+    end)
+  end)
 end
+
+-- Buffer line numbers on a unified diff are noise: the ones that mean anything are printed
+-- in the hunk headers. Toggled on window entry rather than set once, because the diff shares
+-- the top panel's window with ordinary file tabs.
+vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter' }, {
+  callback = function(args)
+    local win = vim.api.nvim_get_current_win()
+    if vim.api.nvim_win_get_buf(win) ~= args.buf then return end
+    if vim.b[args.buf].workspace_diff then
+      vim.wo[win].number = false
+      vim.wo[win].relativenumber = false
+      vim.wo[win].signcolumn = 'no'
+      vim.wo[win].cursorline = false
+    elseif vim.bo[args.buf].buftype == '' then
+      vim.wo[win].number = vim.o.number
+      vim.wo[win].relativenumber = vim.o.relativenumber
+      vim.wo[win].signcolumn = vim.o.signcolumn
+      vim.wo[win].cursorline = vim.o.cursorline
+    end
+  end,
+})
+
+-- a panel left open while its file is edited would otherwise sit there showing hunks that
+-- are no longer true
+vim.api.nvim_create_autocmd('BufWritePost', {
+  callback = function(args)
+    local written = vim.api.nvim_buf_get_name(args.buf)
+    if written == '' then return end
+    written = vim.fs.normalize(written)
+    for rel, b in pairs(diff_bufs) do
+      local d = vim.api.nvim_buf_is_valid(b) and vim.b[b].workspace_diff or nil
+      if d and vim.fs.normalize(d.root .. '/' .. rel) == written then
+        vim.system(git_diff_argv(rel, d.new, d.root), { text = true }, function(res)
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(b) then render_diff(b, rel, res.stdout or '') end
+          end)
+        end)
+      end
+    end
+  end,
+})
 
 function M.diff_close_to_file()
   pcall(vim.cmd, 'DiffviewClose')

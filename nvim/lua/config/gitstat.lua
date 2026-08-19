@@ -135,12 +135,16 @@ function M.open()
       local line = vim.api.nvim_win_get_cursor(0)[1]
       local f = M.files[line]
       if not f then return end
+      if f.bin then
+        vim.notify(f.rel .. ' is binary, nothing to show side by side', vim.log.levels.INFO)
+        return
+      end
       local root = root_cache[vim.fn.getcwd()]
       if not root or root == '' then root = vim.fn.getcwd() end
-      require('config.layout').open_git_diff_tab(f.rel, f.new, root)
+      require('config.layout').open_file_diff(f.rel, f.new, root)
     end
-    vim.keymap.set('n', '<CR>', open_under_cursor, { buffer = buf, desc = 'Diff file (git diff tab)' })
-    vim.keymap.set('n', '<2-LeftMouse>', open_under_cursor, { buffer = buf, desc = 'Diff file (git diff tab)' })
+    vim.keymap.set('n', '<CR>', open_under_cursor, { buffer = buf, desc = 'Diff file (side by side)' })
+    vim.keymap.set('n', '<2-LeftMouse>', open_under_cursor, { buffer = buf, desc = 'Diff file (side by side)' })
   end
 
   local prev = vim.api.nvim_get_current_win()

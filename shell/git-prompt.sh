@@ -10,7 +10,7 @@
 # scheme the terminal is set to. The real values live in tabby/config.yaml.
 #   94  soft periwinkle  (#a5c7ff)   path
 #   95  soft violet      (#ddaaff)   git
-#   37  warm off-white   (#dedacf)   prompt mark, last command succeeded
+#   37  warm off-white   (#dedacf)   user@host, and the prompt mark on success
 #   91  soft red         (#f58c80)   prompt mark, last command failed
 
 __DOTFILES_PROMPT=1
@@ -74,8 +74,14 @@ __dotfiles_prompt() {
   fi
 
   # \[\033]0;\w\007\] is the window title, which Tabby reads for the tab label.
+  #
+  # user@host is spelled out here because taking the ~/.config/git/git-prompt.sh hook skips
+  # the stock Git for Windows PS1 entirely, and that block is the only thing that used to
+  # print it. \u and \h are backslash escapes decoded by bash's own prompt expansion, so
+  # they are unaffected by the promptvars change above, and they keep the name of any one
+  # machine out of this file.
   PS1='\[\033]0;\w\007\]'
-  PS1="$PS1"'\n\[\033[94m\]\w'
+  PS1="$PS1"'\n\[\033[37m\]\u@\h \[\033[94m\]\w'
   PS1="$PS1"'\[\033[95m\]'"${git}"
   PS1="$PS1"'\n'"${mark}"$'❯''\[\033[0m\] '
 

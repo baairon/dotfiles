@@ -38,6 +38,20 @@ done
 unset _d
 export PATH
 
+# --- Windows CLI wrappers --------------------------------------------------------------
+# The Cursor CLI installs on Windows as cursor-agent.cmd / .ps1 with no extensionless
+# script. cmd and PowerShell find those through PATHEXT; bash has no equivalent, so a bare
+# `cursor-agent` is "command not found" even though the install dir is on PATH. Re-expose
+# the bare names as functions that defer to the .cmd. Guarded on the wrapper being present,
+# so this is a no-op on a box without the CLI (or on macOS/Linux, where the real binary is
+# named without an extension and needs none of this).
+for _cmd in cursor-agent agent; do
+  if command -v "$_cmd.cmd" >/dev/null 2>&1; then
+    eval "$_cmd() { command $_cmd.cmd \"\$@\"; }"
+  fi
+done
+unset _cmd
+
 # --- interactive only ------------------------------------------------------------------
 # Non-interactive shells (scp, rsync, anything reading stdout) must return before the
 # first line of output, or they break in ways that are miserable to debug. Nothing below

@@ -129,6 +129,18 @@ function M.open()
     vim.bo[buf].swapfile = false
     vim.bo[buf].filetype = 'gitstat'
     vim.b[buf].workspace_gitstat = true
+
+    local function open_under_cursor()
+      if M.totals.files == 0 then return end
+      local line = vim.api.nvim_win_get_cursor(0)[1]
+      local f = M.files[line]
+      if not f then return end
+      local root = root_cache[vim.fn.getcwd()]
+      if not root or root == '' then root = vim.fn.getcwd() end
+      require('config.layout').open_git_diff_tab(f.rel, f.new, root)
+    end
+    vim.keymap.set('n', '<CR>', open_under_cursor, { buffer = buf, desc = 'Diff file (git diff tab)' })
+    vim.keymap.set('n', '<2-LeftMouse>', open_under_cursor, { buffer = buf, desc = 'Diff file (git diff tab)' })
   end
 
   local prev = vim.api.nvim_get_current_win()
@@ -141,7 +153,7 @@ function M.open()
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = 'no'
-  vim.wo[win].cursorline = false
+  vim.wo[win].cursorline = true
   vim.wo[win].winfixheight = true
   vim.wo[win].winhighlight = 'Normal:NeoTreeNormal,EndOfBuffer:NeoTreeEndOfBuffer'
   if prev and vim.api.nvim_win_is_valid(prev) then vim.api.nvim_set_current_win(prev) end

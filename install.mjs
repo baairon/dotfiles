@@ -755,6 +755,22 @@ function installSoftware(manifest, opts, lines) {
   }
 }
 
+// Cloud-sync folder backups cannot be automated: adding one needs server-assigned IDs
+// (VolumeId/ShareId/RootLinkId) that only the sync client can mint against its backend, and the
+// mapping has to stay consistent with the client's local sync database. So the manifest carries
+// them as a manual checklist and this prints the set to add by hand rather than applying anything.
+function cloudSyncLines(manifest, indent) {
+  const cs = manifest.cloudSync || {};
+  const folders = cs.syncedFolders || [];
+  if (!folders.length) return [`${indent}(none declared)`];
+  const out = [`${indent}${cs.provider || 'cloud sync'}: add these folders by hand in the app (cannot be automated):`];
+  for (const f of folders) {
+    const missing = !isDir(expandEnv(f.path));
+    out.push(`${indent}  [ ] ${f.path}${missing ? '  (local folder missing)' : ''}`);
+  }
+  return out;
+}
+
 function deployMachine(repoDir, opts) {
   const manifest = readManifest(repoDir);
   if (!manifest) {
@@ -773,6 +789,8 @@ function deployMachine(repoDir, opts) {
   applyStartup(manifest, opts, lines);
   lines.push('  user folders:');
   applyKnownFolders(manifest, opts, lines);
+  lines.push('  cloud sync:');
+  for (const l of cloudSyncLines(manifest, '    ')) lines.push(l);
 
   if (opts.privacy) {
     if (opts.dryRun) {
@@ -947,6 +965,9 @@ function printMachineList(opts) {
     const resolved = expandEnv(f.path);
     console.log(`  [${isDir(resolved) ? 'present' : 'absent '}] ${f.name.padEnd(12)} ${resolved}`);
   }
+  console.log('');
+  console.log('Machine cloud sync:');
+  for (const l of cloudSyncLines(manifest, '  ')) console.log(l);
   console.log('');
 }
 

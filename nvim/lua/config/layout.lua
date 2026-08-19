@@ -197,6 +197,41 @@ function M.lazygit_float()
   vim.cmd('startinsert')
 end
 
+local function bash_squote(s)
+  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+-- open `git diff` for one file as a new terminal tab in the top panel
+function M.open_git_diff_tab(relpath, is_new, root)
+  if not relpath or relpath == '' then return end
+  if not root or root == '' then root = vim.fn.getcwd() end
+  local top = M.editor_winid()
+  if top == 0 or not vim.api.nvim_win_is_valid(top) then
+    top = vim.api.nvim_get_current_win()
+  end
+  vim.api.nvim_set_current_win(top)
+
+  -- --color=always forces the red/green even through a pager or when git's color.ui is off;
+  -- git's default pager (less) already carries -R via LESS=FRX, so the color survives.
+  local diff
+  if is_new then
+    diff = 'git -C ' .. bash_squote(root) .. ' diff --color=always --no-index -- /dev/null ' .. bash_squote(relpath)
+  else
+    diff = 'git -C ' .. bash_squote(root) .. ' diff --color=always -- ' .. bash_squote(relpath)
+  end
+
+  local bash = git_bash()
+  local argv
+  if type(bash) == 'table' then
+    argv = { bash[1], '--login', '-i', '-c', diff .. '; exec bash --login -i' }
+  else
+    argv = bash
+  end
+  spawn_term(argv, 'top')
+  vim.b.workspace_cmd = relpath
+  refresh_winbars()
+end
+
 function M.diff_close_to_file()
   pcall(vim.cmd, 'DiffviewClose')
   local win = M.editor_winid()
@@ -263,11 +298,11 @@ local function close_tab()
 end
 
 local function is_aux(win)
+  -- Only the neo-tree git rail is skipped by <A-o>. The gitstat "changes" panel is
+  -- intentionally cyclable so you can land on it and press <CR> to diff a file.
   local buf = vim.api.nvim_win_get_buf(win)
   local ok, src = pcall(function() return vim.b[buf].neo_tree_source end)
-  if ok and src == 'git_status' then return true end
-  local ok2, gs = pcall(function() return vim.b[buf].workspace_gitstat end)
-  return ok2 and gs == true
+  return ok and src == 'git_status'
 end
 
 function M.cycle_panes(dir)

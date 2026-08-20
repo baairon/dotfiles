@@ -314,6 +314,12 @@ local function diff_buf(relpath, root, is_new)
     vim.b[b].workspace_panel = 'top'
     vim.keymap.set('n', 'q', function() require('config.layout')._close_tab() end,
       { buffer = b, desc = 'Close diff' })
+    -- a markdown file's diff is still that file, so <A-p> keeps reaching the preview here
+    if vim.filetype.match({ filename = relpath }) == 'markdown' then
+      vim.keymap.set({ 'n', 'i' }, '<A-p>',
+        function() require('config.layout').diff_markdown_preview() end,
+        { buffer = b, desc = 'Toggle markdown preview' })
+    end
     diff_bufs[relpath] = b
   end
   vim.b[b].workspace_diff = { rel = relpath, root = root, new = is_new }
@@ -348,6 +354,41 @@ function M.open_file_diff(relpath, is_new, root)
       vim.api.nvim_set_current_win(top)
       refresh_winbars()
     end)
+  end)
+end
+
+-- markdown-preview registers MarkdownPreview* as `command! -buffer` on markdown buffers only, so
+-- the toggle cannot run from a diff of one. The file is loaded without ever being displayed and
+-- the toggle runs inside it, so the panel keeps showing the diff and never grows a second tab
+-- reading the same filename.
+function M.diff_markdown_preview()
+  local d = vim.b[vim.api.nvim_get_current_buf()].workspace_diff
+  if not d then return end
+  local path = vim.fs.normalize(d.root .. '/' .. d.rel)
+  if vim.fn.filereadable(path) == 0 then
+    vim.notify(d.rel .. ' is not in the work tree, nothing to preview', vim.log.levels.WARN)
+    return
+  end
+  local fbuf = vim.fn.bufadd(path)
+  vim.fn.bufload(fbuf)
+  -- On a cold start the preview is not opened by the command: it is opened by the node server
+  -- calling back once it is up, against whatever buffer is current by then, which here would be
+  -- the diff. So hold the file current, pumping the event loop, until that call has landed on it.
+  -- What it lands as is the plugin's per-buffer refresh autocmds, which stopping a preview leaves
+  -- behind, so they are cleared first or a second open would read the first one's as its own.
+  local group = 'MKDP_REFRESH_INIT' .. fbuf
+  vim.api.nvim_buf_call(fbuf, function()
+    -- the command is buffer-local and only exists once the plugin has loaded against a markdown
+    -- buffer, so a build that never completed would otherwise surface as a stack trace
+    if vim.fn.exists(':MarkdownPreviewToggle') == 0 then
+      vim.notify('markdown-preview did not load, see :Lazy', vim.log.levels.WARN)
+      return
+    end
+    vim.cmd('silent! autocmd! ' .. group)
+    local was_on = vim.b[fbuf].MarkdownPreviewToggleBool == 1
+    vim.cmd('MarkdownPreviewToggle')
+    if was_on then return end
+    vim.wait(3000, function() return vim.fn.exists('#' .. group .. '#CursorHold') == 1 end, 40)
   end)
 end
 

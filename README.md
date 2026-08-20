@@ -75,7 +75,8 @@ node install.mjs --machine --dry-run
 ```
 
 The manifest declares the software the setup needs, what launches at login and with which flag,
-where the user folders live, and which background collection is switched off. Startup entries and
+where the user folders live, which app opens which file type, and which background collection is
+switched off. Startup entries and
 user folders apply with no elevation. Software is reported as present or missing unless you ask
 for it to be installed, and the privacy changes need administrator rights, so `--privacy` emits a
 script to review and run yourself.
@@ -83,6 +84,14 @@ script to review and run yourself.
 A user folder whose current location still holds files is reported `[BLOCKED]` and left alone
 rather than repointed, since repointing it would strand the data. Move the files first, or pass
 `--force-folders` if you mean it.
+
+File associations are the one part of the manifest that is only ever read. Which app owns an
+extension is stored beside a hash Windows computes over the extension, the signed-in user and the
+handler, and Windows discards an entry whose hash does not match rather than raising an error, so
+a script writing there would report a default it had not actually set. Instead the installer
+compares the declared handler against the real one, marks every difference `[MANUAL]`, and prints
+the Settings link that fixes them. Making the choice there is what gets a correct hash written,
+because Windows writes it itself.
 
 ## Requirements
 
@@ -97,7 +106,7 @@ Cozette, a 6x13 bitmap font, vendored from `the-moonwitch/Cozette` release v.1.3
 `CozetteVector.ttf` and `CozetteVectorBold.ttf` and installed per-user with no elevation. It ships
 Nerd Font icon and Powerline glyphs built in, so no separately patched build is needed.
 
-The profile sets it at `fontSize: 19`. Sizes that land exactly on the pixel grid are 13 and 26;
+The profile sets it at `fontSize: 18`. Sizes that land exactly on the pixel grid are 13 and 26;
 everything else renders slightly soft.
 
 Two settings in the profile behave differently than they look:
@@ -122,3 +131,23 @@ node install.mjs --optional-fonts
 A default run never touches them. They register per-user with no elevation, the same as the
 terminal font, and `--list` shows them separately so a face you have not asked for does not read
 as one the installer failed to install.
+
+## The terminal window
+
+The terminal is a drop-down. The machine manifest starts it at login with `--hidden`, so it comes
+up with its sessions ready and nothing on screen, and `Ctrl+Space` drops it over whatever you are
+looking at. Tabby registers that chord through Electron's global shortcut table, which means it is
+claimed for as long as Tabby runs and no other app sees it. Pressing it again sends the window away.
+
+The size it arrives at is `dock`, not a remembered fullscreen. Tabby saves only a window's bounds
+and whether it was maximized, so a window left in fullscreen comes back an ordinary one, and
+`--hidden` skips the restore entirely, which used to make the first summon of a session a small
+window in the corner. Docking is re-applied every single time the window is shown, so `dockFill`
+and `dockSpace` at `1` land it over the whole work area, on whichever screen the cursor is on,
+identically on every summon. It stops at the taskbar: the dock measures the work area and clamps
+both factors at 1, so this is as close to `F11` as the config reaches.
+
+Two smaller things follow from that. `dockAlwaysOnTop` is off, so the window stays alt-tabbable
+with an ordinary taskbar button instead of floating above every other app, and the tray icon is
+created the first time the window goes from shown to hidden, so on a fresh boot the chord is the
+only way in until you have summoned it once.

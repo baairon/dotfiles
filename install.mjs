@@ -81,6 +81,8 @@ const FONTS_REG_KEY = 'HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fo
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_APPROVED_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
 const USER_SHELL_FOLDERS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders';
+// Read-only, unlike the three above. See fileAssociationLines for why it can never be written.
+const FILE_EXTS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts';
 
 const exists = (p) => {
   try { fs.accessSync(p); return true; } catch { return false; }
@@ -771,6 +773,48 @@ function cloudSyncLines(manifest, indent) {
   return out;
 }
 
+// Which app opens which extension, reported and never written. Not for want of elevation, which
+// is the reason the privacy section is only ever emitted as a script: this one is unwritable at
+// any privilege level. The choice lives in FILE_EXTS_KEY\<ext>\UserChoice beside a Hash that
+// Windows computes over the extension, the user's SID and the ProgId, and validates on read. An
+// entry whose hash does not match is not an error either: Windows discards it and keeps the
+// previous app. So a script writing here would print a default it had not actually set, which is
+// the one failure this installer is built to avoid. Windows writes a correct hash itself when the
+// choice is made in Settings or the "Open with" dialog, which leaves exactly two things worth
+// automating, and both are here: saying which extensions are still wrong, and where to fix them.
+function fileAssociationLines(manifest, indent) {
+  const handlers = manifest.fileAssociations?.handlers || [];
+  if (!handlers.length) return [`${indent}(none declared)`];
+  const out = [];
+  for (const h of handlers) {
+    // The courtesy applyStartup gives a Run entry whose exe is absent: a handler naming a
+    // program this machine does not have is a declaration to skip, not a difference to fix.
+    if (h.verifyPath && !exists(expandEnv(h.verifyPath))) {
+      out.push(`${indent}[skip   ] ${h.app}: not installed (${expandEnv(h.verifyPath)})`);
+      continue;
+    }
+    const extensions = h.extensions || [];
+    const outstanding = [];
+    for (const ext of extensions) {
+      const have = regQuery(`${FILE_EXTS_KEY}\\${ext}\\UserChoice`, 'ProgId');
+      if (have === h.progId) {
+        out.push(`${indent}[ok     ] ${ext}`);
+        continue;
+      }
+      // 'unset' means no UserChoice at all, which is not the same as wrong: Windows then falls
+      // back to the system-wide handler. Reported as outstanding anyway, because a fallback is
+      // whatever the last installer to touch the extension left behind, not a choice.
+      out.push(`${indent}[MANUAL ] ${ext}: ${have || 'unset'} -> ${h.progId}`);
+      outstanding.push(ext);
+    }
+    if (outstanding.length) {
+      out.push(`${indent}${outstanding.length} of ${extensions.length} to set by hand in Settings > Default apps:`);
+      out.push(`${indent}  ${h.settingsLink || 'ms-settings:defaultapps'}`);
+    }
+  }
+  return out;
+}
+
 function deployMachine(repoDir, opts) {
   const manifest = readManifest(repoDir);
   if (!manifest) {
@@ -791,6 +835,9 @@ function deployMachine(repoDir, opts) {
   applyKnownFolders(manifest, opts, lines);
   lines.push('  cloud sync:');
   for (const l of cloudSyncLines(manifest, '    ')) lines.push(l);
+  // No --dry-run branch below, and none inside: the step only reads. That is the whole design.
+  lines.push('  file associations:');
+  for (const l of fileAssociationLines(manifest, '    ')) lines.push(l);
 
   if (opts.privacy) {
     if (opts.dryRun) {
@@ -968,6 +1015,9 @@ function printMachineList(opts) {
   console.log('');
   console.log('Machine cloud sync:');
   for (const l of cloudSyncLines(manifest, '  ')) console.log(l);
+  console.log('');
+  console.log('Machine file associations:');
+  for (const l of fileAssociationLines(manifest, '  ')) console.log(l);
   console.log('');
 }
 
@@ -1162,6 +1212,10 @@ function selftest() {
       check('example entries explain themselves', exs.every((s) => typeof s.why === 'string' && s.why.length > 10));
       check('example declares the two the installer cannot bootstrap',
         exs.some((s) => s.detectOnPath === 'node') && exs.some((s) => s.detectOnPath === 'git'));
+      // The example is where the shape of a section is documented, so a section that exists only
+      // in the untracked manifest is one a fresh clone has no way to learn about.
+      check('example declares the file-association shape',
+        (ex.fileAssociations?.handlers || []).length > 0);
 
       // bootstrap.ps1 may run before any checkout exists, so it carries two ids as constants.
       // That is the only place in the repo an id is written in code, and it is only safe while
@@ -1203,6 +1257,24 @@ function selftest() {
     // rg, not ripgrep: naming the package instead of the binary is a silent false MISSING.
     check('prerequisite detection names the binary, not the package',
       pre.every((s) => !s.detectOnPath.includes('.') && s.detectOnPath === s.detectOnPath.toLowerCase()));
+
+    // File associations. Most of these keep the manifest comparable to the registry; the last
+    // one keeps the step honest. Writing a UserChoice means forging a hash Windows validates and
+    // silently rejects, so the installer would be reporting a default it had not set, and that
+    // check is what a later "it would be easy to just automate this" edit has to argue with.
+    const fa = mf.fileAssociations?.handlers || [];
+    const exts = fa.flatMap((h) => h.extensions || []);
+    check('every handler names an app and a ProgId',
+      fa.every((h) => !!h.app && !!h.progId && typeof h.why === 'string' && h.why.length > 10));
+    check('every handler declares extensions', fa.every((h) => (h.extensions || []).length > 0));
+    // The comparison is a registry key lookup, so a missing dot or a stray capital is a key that
+    // does not exist, and a key that does not exist reads as "no default set" rather than a typo.
+    check('extensions are lowercase and keep their dot', exts.every((e) => /^\.[a-z0-9]+$/.test(e)));
+    check('extensions are unique', new Set(exts).size === exts.length);
+    // Held on its own line so the check does not match its own source text.
+    const writeCall = "execFileSync('reg'";
+    check('file associations are read, never written',
+      selfSrc.split('\n').every((l) => !(l.includes('FILE_EXTS_KEY') && l.includes(writeCall))));
   }
 
   console.log(`selftest: ${pass} checks passed, ${fails.length} failed`);

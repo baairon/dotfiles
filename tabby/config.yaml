@@ -221,18 +221,24 @@ terminal:
   fontWeight: 300
   fontWeightBold: 600
   paletteGenerate: false
-  paletteHarmonious: false
-  fontSize: 19
-  cursor: beam
+  fontSize: 18
+  cursorBlink: false
   font: CozetteVector
 ssh: {}
 clickableLinks: {}
 accessibility:
   animations: false
 appearance:
-  frame: native
+  frame: thin
   vibrancy: true
-  opacity: 0.81
+  opacity: 0.6
+  tabsInFullscreen: true
+  dock: top
+  dockScreen: current
+  dockFill: 1
+  dockSpace: 1
+  dockAlwaysOnTop: false
+  dockHideOnBlur: false
 hacks:
   disableGPU: false
 providerBlacklist: []

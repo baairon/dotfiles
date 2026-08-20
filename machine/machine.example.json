@@ -2,7 +2,7 @@
   "_comment": "The shape of a machine manifest, and the starting point for a real one. Copy this file to machine/machine.json, then edit it for the machine you are on: `cp machine/machine.example.json machine/machine.json`. The real manifest is gitignored, because a list of what is installed, what launches at login and where the user folders live describes a person's machine and this repo is public. Paths use %VAR% placeholders expanded at deploy time, so nothing here is pinned to one username. JSON rather than YAML because the installer runs on node: builtins with zero dependencies.",
   "version": 1,
 
-  "_softwareComment": "This list is the ONLY place a package id is allowed to live. The installer prints its install hints from these ids rather than from string literals in code, because the one id that was written in code (a wrong tree-sitter id) went unchecked for exactly as long as it had nowhere to be compared against. Every id here is verified with `winget show --id <id> --exact`. Detection order is detectOnPath, then detectPath, then winget: the first two exist because software installed through another channel is still installed, and winget reports only what winget put there. What ships in this example is the toolchain this repo needs and nothing else; anything else that belongs on a given machine goes in that machine's own manifest.",
+  "_softwareComment": "This list is the ONLY place a package id is allowed to live. The installer prints its install hints from these ids rather than from string literals in code, because the one id that was written in code (a wrong tree-sitter id) went unchecked for exactly as long as it had nowhere to be compared against. Every id here is verified with `winget show --id <id> --exact`. Detection order is detectOnPath, then detectPath, then winget: the first two exist because software installed through another channel is still installed, and winget reports only what winget put there. What ships in this example is the toolchain this repo needs plus whatever another section here names as its worked example, and nothing else; anything else that belongs on a given machine goes in that machine's own manifest.",
 
   "software": [
     { "name": "Tabby",           "winget": "Eugeny.Tabby",                "role": "terminal",   "why": "The terminal the profile in tabby/ targets." },
@@ -11,7 +11,9 @@
     { "name": "Node.js",         "winget": "OpenJS.NodeJS.LTS",           "role": "core",       "prerequisite": true, "detectOnPath": "node",        "why": "Runs install.mjs, so it is the one thing that has to exist before any of this applies. Often installed from the nodejs.org MSI or a version manager, none of which winget can see, which is why detection is PATH-first." },
     { "name": "ripgrep",         "winget": "BurntSushi.ripgrep.MSVC",     "role": "editor-dep", "prerequisite": true, "detectOnPath": "rg",          "why": "Backs telescope live grep. The binary is rg, not ripgrep." },
     { "name": "lazygit",         "winget": "JesseDuffield.lazygit",       "role": "editor-dep", "prerequisite": true, "detectOnPath": "lazygit",     "why": "The <leader>gg git float." },
-    { "name": "tree-sitter CLI", "winget": "tree-sitter.tree-sitter-cli", "role": "editor-dep", "prerequisite": true, "detectOnPath": "tree-sitter", "why": "nvim-treesitter tracks its main branch, which builds parsers through this CLI instead of shipping them, so a fresh editor needs it plus a C compiler. 0.26 or later. Commonly installed with `npm i -g tree-sitter-cli`, which winget cannot see." }
+    { "name": "tree-sitter CLI", "winget": "tree-sitter.tree-sitter-cli", "role": "editor-dep", "prerequisite": true, "detectOnPath": "tree-sitter", "why": "nvim-treesitter tracks its main branch, which builds parsers through this CLI instead of shipping them, so a fresh editor needs it plus a C compiler. 0.26 or later. Commonly installed with `npm i -g tree-sitter-cli`, which winget cannot see." },
+    { "name": "mpv",             "winget": "shinchiro.mpv",               "role": "media",      "detectPath": "%ProgramFiles%\\MPV Player\\mpv.exe", "why": "The player the fileAssociations section names, so it is here for the same reason the editor is: a declared default handler for a program that is not installed is a broken declaration. Detection is by path rather than by PATH or by winget, and both halves of that matter. The package is an Inno installer that lands in Program Files and registers its ProgIds without ever putting mpv on PATH, and winget files it under an ARP id rather than its catalog id, so an exact `winget list --id` query answers 'not installed' while the exe is sitting right there." },
+    { "name": "FFmpeg",          "winget": "Gyan.FFmpeg",                 "role": "media",      "detectOnPath": "ffmpeg",      "why": "Command-line decode, transcode and probe, and the library set the player above is built against. PATH-first detection because a build unzipped by hand is still ffmpeg." }
   ],
 
   "startup": {
@@ -79,5 +81,20 @@
     "provider": null,
     "syncedFolders": [],
     "excludedFromSync": []
+  },
+
+  "fileAssociations": {
+    "_comment": "Reported, never written, and the one section here that could not be applied even with elevation. Which app owns an extension lives in HKCU under Explorer\\FileExts\\<ext>\\UserChoice, next to a Hash that Windows computes over the extension, the user SID and the ProgId. A wrong hash is not an error: Windows discards the entry and keeps the previous app, so a script writing this would report success while changing nothing, which is the one thing this installer must never do. Windows itself writes a correct hash when the choice is made in Settings or in the Open with dialog, so the honest automation is to compare wanted against actual and say which ones are still outstanding.",
+    "_extensionNote": "Extensions are lowercase and carry their leading dot, matching the registry key names exactly, because the comparison is a key lookup rather than a search.",
+    "handlers": [
+      {
+        "app": "MPV Player",
+        "progId": "mpv.file",
+        "verifyPath": "%ProgramFiles%\\MPV Player\\mpv.exe",
+        "settingsLink": "ms-settings:defaultapps?registeredAppMachine=MPV Player",
+        "extensions": [".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv"],
+        "why": "Video plays in mpv. Audio extensions are left out on purpose even though mpv handles them, because a double-clicked track would open a video player window. app and progId are separate fields for a reason: the app name is what Settings lists, while the ProgId is what the registry stores, and an installer is free to name them differently."
+      }
+    ]
   }
 }

@@ -195,28 +195,38 @@ terminal:
   profile: local:git-bash
   frontend: xterm-webgl
   searchOptions: {}
+  # Catppuccin Mocha, transcribed from the upstream palette rather than installed:
+  # community-color-schemes is blacklisted below, so there is no scheme picker to
+  # select it from and the values have to live here. paletteGenerate is off, so the
+  # bright half is never synthesized and all sixteen entries are spelled out.
+  #
+  # The ANSI mapping is upstream's own, not a literal hue match: slot 0 is surface1
+  # rather than black so anything drawing on it stays legible, magenta is pink,
+  # cyan is teal, and the two whites are subtext1 over subtext0, which puts bright
+  # white a step darker than white.
   colorScheme:
-    name: Custom
-    foreground: '#cacaca'
-    background: '#030509'
-    cursor: '#bbbbbb'
+    name: Catppuccin Mocha
+    foreground: '#cdd6f4'
+    background: '#1e1e2e'
+    cursor: '#f5e0dc'
+    selection: '#585b70'
     colors:
-      - '#000000'
-      - '#ff615a'
-      - '#b1e969'
-      - '#ebd99c'
-      - '#5da9f6'
-      - '#e86aff'
-      - '#82fff7'
-      - '#dedacf'
-      - '#313131'
-      - '#f58c80'
-      - '#ddf88f'
-      - '#eee5b2'
-      - '#a5c7ff'
-      - '#ddaaff'
-      - '#b7fff9'
-      - '#ffffff'
+      - '#45475a'
+      - '#f38ba8'
+      - '#a6e3a1'
+      - '#f9e2af'
+      - '#89b4fa'
+      - '#f5c2e7'
+      - '#94e2d5'
+      - '#bac2de'
+      - '#585b70'
+      - '#f38ba8'
+      - '#a6e3a1'
+      - '#f9e2af'
+      - '#89b4fa'
+      - '#f5c2e7'
+      - '#94e2d5'
+      - '#a6adc8'
   customColorSchemes: []
   fontWeight: 300
   fontWeightBold: 600

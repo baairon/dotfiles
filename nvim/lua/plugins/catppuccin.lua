@@ -5,8 +5,9 @@ return {
   priority = 1000, -- must land before anything else reads a highlight group
   opts = {
     flavour = 'mocha',
-    -- Tabby already paints #030509 with vibrancy behind it, so drawing no
-    -- background keeps that rather than mocha's lighter #1e1e2e base
+    -- Tabby paints mocha's own #1e1e2e and runs vibrancy over it, so drawing no
+    -- background here keeps that show-through instead of sealing it off behind an
+    -- opaque copy of the same colour
     transparent_background = true,
     -- the embedded terminal keeps Tabby's own ANSI palette, so a shell looks the
     -- same inside an nvim pane as it does in its own tab

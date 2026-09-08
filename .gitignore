@@ -17,3 +17,7 @@ machine/machine.json
 # Agent working state. Also covered by the deployed global ignore, repeated here so the repo
 # does not depend on the shell layer having been deployed first.
 .claude/
+
+# Local Neovim capture from a debug session; never part of the config.
+nvim.log
+splash-capture.json

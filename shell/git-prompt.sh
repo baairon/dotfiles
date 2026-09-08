@@ -7,11 +7,14 @@
 # has to source them itself. Miss that and the prompt silently loses its branch segment.
 #
 # Colours are ANSI palette indices, never hex escapes, so the prompt follows whatever
-# scheme the terminal is set to. The real values live in tabby/config.yaml.
-#   94  soft periwinkle  (#a5c7ff)   path
-#   95  soft violet      (#ddaaff)   git
-#   37  warm off-white   (#dedacf)   user@host, and the prompt mark on success
-#   91  soft red         (#f58c80)   prompt mark, last command failed
+# scheme the terminal is set to. The real values live in tabby/config.yaml, which is
+# Catppuccin Mocha. Mocha maps every bright slot to the same hue as its normal one, so
+# 91/94/95 render here exactly as 31/34/35 would; they stay bright for the terminals that
+# do separate the two halves, where these segments are meant to read as the lighter tone.
+#   94  blue      (#89b4fa)   path
+#   95  pink      (#f5c2e7)   git
+#   37  subtext1  (#bac2de)   user@host, and the prompt mark on success
+#   91  red       (#f38ba8)   prompt mark, last command failed
 
 __DOTFILES_PROMPT=1
 

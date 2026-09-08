@@ -7,6 +7,7 @@ local M = {}
 local FALLBACK = {
   overlay0 = "#6c7086", subtext0 = "#a6adc8", subtext1 = "#bac2de",
   text = "#cdd6f4", lavender = "#b4befe", peach = "#fab387",
+  surface1 = "#45475a",
 }
 
 local function palette()
@@ -63,10 +64,11 @@ local function dirs_layout(rows, count)
 end
 
 local cols, rows = 0, 0
-local win, buf, ns
+local win, buf, ns, group
 local on_done_cb, done = nil, false
 local sel = 1
 local chosen_dir = nil
+local restore_target = nil
 local view = "menu"
 local dev_dirs = {}
 local dir_items = {}
@@ -116,9 +118,9 @@ local function setup_hl()
   set(0, "SplashMsg",   { fg = P.peach })
   set(0, "SplashTitle", { fg = P.lavender })
   set(0, "SplashOn",    { fg = P.text })
-  -- accent and selection inherit the active colorscheme rather than hardcoding
   set(0, "SplashAccent", { link = "Directory" })
-  set(0, "SplashSel",    { link = "CursorLine" })
+  -- own band: CursorLine was darkened toward mocha base and disappeared on the picker
+  set(0, "SplashSel",    { bg = P.surface1 })
 end
 
 local IS_WIN = vim.fn.has("win32") == 1
@@ -154,24 +156,16 @@ local function write_recent(list)
   f:close()
 end
 
--- one rewrite for both callers: the dir leaves its old slot either way, and
--- `keep` decides whether it comes back at the top
-local function rewrite_recent(dir, keep)
-  local out, key = {}, dir_key(dir)
-  if keep then out[1] = dir end
+-- the visited directory leaves its old slot and comes back at the top, so the file
+-- stays newest-first and carries no duplicate
+local function push_recent(dir)
+  dir = vim.fs.normalize(dir)
+  if dir == "" or vim.fn.isdirectory(dir) ~= 1 then return end
+  local out, key = { dir }, dir_key(dir)
   for _, d in ipairs(load_recent()) do
     if dir_key(d) ~= key then out[#out + 1] = d end
   end
   write_recent(out)
-end
-
-local function push_recent(dir)
-  dir = vim.fs.normalize(dir)
-  if dir ~= "" and vim.fn.isdirectory(dir) == 1 then rewrite_recent(dir, true) end
-end
-
-local function forget_recent(dir)
-  rewrite_recent(vim.fs.normalize(dir), false)
 end
 
 local function build_dir_items()
@@ -183,17 +177,11 @@ local function build_dir_items()
   end
 end
 
-local function build_recent_items()
-  dir_items = {
-    { kind = "back", icon = IC.back, label = "Back", hl = "SplashDim" },
-  }
-  for _, dir in ipairs(load_recent()) do
-    dir_items[#dir_items + 1] = {
-      -- `:~` folds the home prefix and renders native separators, matching the footer
-      kind = "recent", icon = IC.dir, label = vim.fn.fnamemodify(dir, ":~"),
-      hl = "SplashItem", path = dir, clip_left = true,
-    }
-  end
+-- One read of the history file, for the restore target that falls out of it. Nothing outside
+-- the splash writes that file while the splash is up, so this runs once on show rather than
+-- once per keypress.
+local function reload_recent()
+  restore_target = load_recent()[1]
 end
 
 local function scan_dev_dirs()
@@ -213,27 +201,17 @@ end
 -- every view places the same shape: marker, icon, label. the label is clipped to
 -- the block so a long name cannot drag the selection background past it, and
 -- paths clip from the left because the tail is the part worth reading
-local function draw_entry(row, left, w, icon, label, hl, selected, clip_left)
-  if selected then row:at(left, IC.marker, "SplashAccent") end
-  row:at(left + 2, icon, hl)
-  local budget, len = w - 5, vim.fn.strchars(label)
-  if budget > 1 and len > budget then
-    label = clip_left
-      and ("…" .. vim.fn.strcharpart(label, len - budget + 1))
-      or (vim.fn.strcharpart(label, 0, budget - 1) .. "…")
-  end
-  row:at(left + 5, label, hl)
+local function clip(label, budget, from_left)
+  local len = vim.fn.strchars(label)
+  if budget <= 1 or len <= budget then return label end
+  if from_left then return "…" .. vim.fn.strcharpart(label, len - budget + 1) end
+  return vim.fn.strcharpart(label, 0, budget - 1) .. "…"
 end
 
--- the recent list carries paths rather than bare ~/dev names, so its block grows
--- to fit the longest one; still centered, still bounded by the window
-local function picker_w()
-  if view ~= "recent" then return MENU_W end
-  local widest = 0
-  for _, it in ipairs(dir_items) do
-    widest = math.max(widest, vim.api.nvim_strwidth(it.label))
-  end
-  return math.max(MENU_W, math.min(cols - 4, widest + 6))
+local function draw_entry(row, left, w, icon, label, hl, selected)
+  if selected then row:at(left, IC.marker, "SplashAccent") end
+  row:at(left + 2, icon, hl)
+  row:at(left + 5, clip(label, w - 5), hl)
 end
 
 local function draw_menu(row)
@@ -251,18 +229,16 @@ local ARROW_UP = "\226\150\178"
 local ARROW_DOWN = "\226\150\188"
 
 local HELP_DIRS = "↵ open   e dev   c clone   d delete   esc back"
-local HELP_RECENT = "↵ open   d forget   c clear   esc back"
 
 local function draw_picker(row)
-  local recent = (view == "recent")
-  local w = picker_w()
+  local w = MENU_W
   local left = math.floor((cols - w) / 2)
   local count = #dir_items
   local title_row, max_vis = dirs_layout(rows, count)
   local list_top = title_row + 2
   local scroll = math.max(0, dir_sel - max_vis)
 
-  local head = recent and "recent" or "~/dev"
+  local head = "~/dev"
   local title = row(title_row):at(left + 2, head, "SplashTitle")
   local msg = busy or status
   if msg then title:at(left + 3 + vim.api.nvim_strwidth(head), msg, "SplashMsg") end
@@ -280,11 +256,11 @@ local function draw_picker(row)
     local r = row(last_r)
     if di == dir_sel then
       local bg = r:at(left, "").bytes
-      draw_entry(r, left, w, it.icon, it.label, "SplashOn", true, it.clip_left)
+      draw_entry(r, left, w, it.icon, it.label, "SplashOn", true)
       r:at(left + w, "")
       r:mark(bg, "SplashSel", 1)
     else
-      draw_entry(r, left, w, it.icon, it.label, it.hl, false, it.clip_left)
+      draw_entry(r, left, w, it.icon, it.label, it.hl, false)
     end
   end
 
@@ -292,24 +268,37 @@ local function draw_picker(row)
     row(last_r + 1):at(left + math.floor(w / 2), ARROW_DOWN, "SplashDim")
   end
 
-  local help = recent and HELP_RECENT or HELP_DIRS
-  local hw = vim.api.nvim_strwidth(help)
-  row(rows - 3):at(math.max(0, math.floor((cols - hw) / 2)), help, "SplashDim")
+  local hw = vim.api.nvim_strwidth(HELP_DIRS)
+  row(rows - 3):at(math.max(0, math.floor((cols - hw) / 2)), HELP_DIRS, "SplashDim")
 end
 
+-- The menu has no room for a status line of its own, so the footer carries it: it is one row
+-- that is already there, and the cwd it usually shows is the least urgent of the things that
+-- can want it.
 local function draw_footer(row)
-  local cwd = vim.fn.fnamemodify(vim.fn.getcwd(), ":~")
-  local maxw, w = cols - 6, vim.fn.strchars(cwd)
-  if maxw > 1 and w > maxw then
-    cwd = "…" .. vim.fn.strcharpart(cwd, w - maxw + 1)
+  local r = row(rows - 1)
+  if view == "menu" and status then
+    local w = vim.api.nvim_strwidth(status)
+    r:at(math.max(0, math.floor((cols - w) / 2)), status, "SplashMsg")
+    return
   end
+  -- with Restore selected the footer says what it would restore, so the answer is on screen
+  -- exactly while it is the question being asked
+  if view == "menu" and MENU[sel].action == "restore" and restore_target then
+    local target = clip(vim.fn.fnamemodify(restore_target, ":~"), cols - 6, true)
+    local left = math.max(0, math.floor((cols - (2 + vim.api.nvim_strwidth(target))) / 2))
+    r:at(left, IC.dir, "SplashDim"):at(left + 2, target, "SplashItem")
+    return
+  end
+  local cwd = clip(vim.fn.fnamemodify(vim.fn.getcwd(), ":~"), cols - 6, true)
   local left = math.max(0, math.floor((cols - (2 + vim.api.nvim_strwidth(cwd))) / 2))
-  row(rows - 1):at(left, IC.dir, "SplashDim"):at(left + 2, cwd, "SplashDim")
+  r:at(left, IC.dir, "SplashDim"):at(left + 2, cwd, "SplashDim")
 end
 
 local function finish()
   if done then return end
   done = true
+  if group then vim.api.nvim_del_augroup_by_id(group); group = nil end
   if win and vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
   if buf and vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
   win, buf = nil, nil
@@ -329,6 +318,12 @@ local function render()
     return
   end
   local ok = pcall(function()
+    -- The terminal can settle on a new size after VimEnter. Use the live grid on
+    -- every draw, including keys pressed before the resize event is delivered.
+    cols, rows = vim.o.columns, math.max(1, vim.o.lines - 1)
+    if vim.api.nvim_win_get_width(win) ~= cols or vim.api.nvim_win_get_height(win) ~= rows then
+      vim.api.nvim_win_set_config(win, { relative = "editor", row = 0, col = 0, width = cols, height = rows })
+    end
     local out = {}
     -- rows are sparse; anything off-screen lands in a throwaway and is dropped
     local function row(r)
@@ -360,8 +355,11 @@ local function render()
       })
     end
   end)
-  if not ok then finish() end
-  pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
+  if not ok then finish(); return end
+  vim.api.nvim_win_set_cursor(win, { rows, 0 })
+  -- This is a screen, not a scrolling document. A shrink can otherwise retain
+  -- the old bottom cursor row and scroll the menu upwards on the next key.
+  vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 1, leftcol = 0, skipcol = 0 }) end)
 end
 
 local function quit_nvim()
@@ -371,6 +369,7 @@ end
 
 local function move_sel(d)
   if committed then return end
+  status = nil
   if view == "menu" then
     sel = ((sel - 1 + d) % #MENU) + 1
   else
@@ -393,9 +392,6 @@ local function activate()
     elseif it.kind == "dir" then
       chosen_dir = DEV_DIR .. "/" .. it.name
       commit()
-    elseif it.kind == "recent" then
-      chosen_dir = it.path
-      commit()
     end
     return
   end
@@ -405,11 +401,13 @@ local function activate()
   elseif item.action == "launch" then
     commit()
   elseif item.action == "restore" then
-    build_recent_items()
-    local empty = (#dir_items == 1)
-    busy, status = nil, empty and "no history yet" or nil
-    view = "recent"
-    dir_sel = empty and 1 or 2
+    -- load_recent prunes directories that no longer exist, so the target is always openable
+    if restore_target then
+      chosen_dir = restore_target
+      commit()
+    else
+      status = "no history yet"
+    end
   elseif item.action == "new" then
     if vim.fn.isdirectory(DEV_DIR) == 0 then pcall(vim.fn.mkdir, DEV_DIR, "p") end
     scan_dev_dirs()
@@ -537,31 +535,6 @@ local function delete_dir()
   end)
 end
 
--- forgetting drops the row from the history file only; the directory stays put
-local function forget_selected()
-  if committed or busy or view ~= "recent" then return end
-  local it = dir_items[dir_sel]
-  if not it or it.kind ~= "recent" then return end
-  forget_recent(it.path)
-  build_recent_items()
-  if #dir_items == 1 then
-    dir_sel, status = 1, "no history yet"
-  else
-    dir_sel = math.min(dir_sel, #dir_items)
-  end
-end
-
--- wiping the list is the same trade at every row: the file empties, the
--- directories stay. one confirm, since ten entries go at once
-local function clear_recent()
-  if committed or busy or view ~= "recent" then return end
-  status = nil
-  if vim.fn.confirm("Clear all recent history?", "&Yes\n&No", 2) ~= 1 then return end
-  write_recent({})
-  build_recent_items()
-  dir_sel, status = 1, "no history yet"
-end
-
 function M.show(on_done)
   if #vim.api.nvim_list_uis() == 0 then
     return on_done()
@@ -577,6 +550,7 @@ function M.show(on_done)
   end
   setup_hl()
   scan_dev_dirs()
+  reload_recent()
   done = false
   committed = false
   view = "menu"
@@ -587,6 +561,7 @@ function M.show(on_done)
   on_done_cb = on_done
   buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].filetype = "splash"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
   win = vim.api.nvim_open_win(buf, true, {
@@ -612,12 +587,21 @@ function M.show(on_done)
       vim.wo[win].relativenumber = false
       vim.wo[win].signcolumn     = "no"
       vim.wo[win].statuscolumn   = ""
+      vim.wo[win].winbar         = ""
+      vim.wo[win].scrolloff      = 0
+      vim.wo[win].sidescrolloff  = 0
+      vim.wo[win].scrollbind     = false
+      vim.wo[win].cursorbind     = false
     end
   end
+  lock_win_opts()
+  group = vim.api.nvim_create_augroup("WorkspaceSplash", { clear = true })
   vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
+    group    = group,
     buffer   = buf,
     callback = lock_win_opts,
   })
+  vim.api.nvim_create_autocmd("VimResized", { group = group, callback = render })
   ns = vim.api.nvim_create_namespace("splash")
   local function kmap(lhs, fn)
     vim.keymap.set("n", lhs, function()
@@ -637,12 +621,8 @@ function M.show(on_done)
   kmap("l", function() shortcut("l") end)
   kmap("r", function() shortcut("r") end)
   kmap("n", function() shortcut("n") end)
-  kmap("c", function()
-    if view == "recent" then clear_recent() else clone_repo() end
-  end)
-  kmap("d", function()
-    if view == "recent" then forget_selected() else delete_dir() end
-  end)
+  kmap("c", clone_repo)
+  kmap("d", delete_dir)
   kmap("e", open_dev)
   render()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })

@@ -33,7 +33,9 @@ o.updatetime = 250
 o.timeoutlen = 400
 o.ttimeoutlen = 50
 o.showmode = false
-o.guicursor:append('a:blinkon0')
+-- Block in insert and in the terminal pane. Cozette cannot keep a ver25 bar visible
+-- on mocha, and the middle panel is a terminal (t:), not a file insert bar.
+o.guicursor = 'n-v-c:block-Cursor,i-ci-ve:block-Cursor,r-cr:hor20-Cursor,t:block-TermCursor,a:blinkon0'
 o.shortmess:append('I')
 o.fillchars:append({ eob = ' ', diff = ' ' })
 

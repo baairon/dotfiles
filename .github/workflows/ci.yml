@@ -26,6 +26,9 @@ jobs:
       - name: selftest
         run: node install.mjs --selftest
 
+      - name: installer unit tests
+        run: node --test tests/installer.test.mjs
+
       # A clone has no machine/machine.json, so this is also the fresh-machine path: it must
       # report a plan rather than fall over, and it must never install the optional fonts.
       - name: dry run, writes nothing
@@ -74,8 +77,43 @@ jobs:
               echo "FAIL $f"
               fail=1
             fi
-          done < <(find nvim -name '*.lua' -print | sort)
+          done < <(find nvim tests -name '*.lua' -print | sort)
           exit $fail
+
+  # Parsing proves the config loads; this proves it behaves. Running it on Linux is the point,
+  # the same reason the installer job is a matrix: these take the non-Windows branches in
+  # splash.lua and diff.lua that a Windows-only author never executes.
+  nvim:
+    name: editor runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu ships a Neovim older than this config's floor, and the appimage wants FUSE on
+      # the runner, so take the release tarball at a pinned version and keep it out of the
+      # checkout, which the tests read as the repo root.
+      - name: install neovim
+        env:
+          NVIM_VERSION: v0.12.5
+        run: |
+          mkdir -p "$RUNNER_TEMP/nvim"
+          curl -fsSL -o "$RUNNER_TEMP/nvim.tar.gz" \
+            "https://github.com/neovim/neovim/releases/download/$NVIM_VERSION/nvim-linux-x86_64.tar.gz"
+          tar -xzf "$RUNNER_TEMP/nvim.tar.gz" -C "$RUNNER_TEMP/nvim" --strip-components=1
+          echo "$RUNNER_TEMP/nvim/bin" >> "$GITHUB_PATH"
+
+      - name: version
+        run: nvim --version | head -1
+
+      # -l exits nonzero on an uncaught error, so a failed check fails the job.
+      - name: runtime checks
+        run: nvim --headless -u NONE -l tests/runtime.lua
+
+      # Attaches a real UI to a child editor and resizes it, which is the only way to catch
+      # the splash keeping a stale buffer length after the terminal shrinks.
+      - name: splash resize checks
+        run: nvim --headless -u NONE -l tests/ui.lua
 
   # Everything the repo promises about what it does not publish, asserted rather than trusted.
   privacy:

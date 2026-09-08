@@ -1,10 +1,21 @@
+-- Match the native cursor and the transparent terminal's underlying palette.
+local ROSEWATER = '#f5e0dc'
+local BASE = '#1e1e2e'
+
 return {
   'sphamba/smear-cursor.nvim',
   event = 'VeryLazy',
   opts = {
     smear_insert_mode   = false,
-    smear_terminal_mode = true,
+    -- Terminal TUIs own their cursor while repainting menus and input fields.
+    smear_terminal_mode = false,
+    filetypes_disabled = { 'splash' },
     smear_to_cmd        = true,
+
+    cursor_color              = ROSEWATER,
+    cursor_color_insert_mode  = ROSEWATER,
+    -- Normal.bg is NONE under transparent mocha, so name the blending ground.
+    normal_bg                 = BASE,
 
     legacy_computing_symbols_support = true,
     never_draw_over_target           = true,
@@ -22,4 +33,11 @@ return {
     anticipation            = 0.15,
     distance_stop_animating = 0.08,
   },
+  config = function(_, opts)
+    local native_cursor = vim.o.guicursor
+    require('smear_cursor').setup(opts)
+    -- Keep the native cursor visible while drawing the trail. Restoring the option
+    -- also protects terminal input without replacing the plugin's private functions.
+    vim.o.guicursor = native_cursor
+  end,
 }

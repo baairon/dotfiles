@@ -11,10 +11,12 @@ machine needs.
 | Path                | Purpose                                                                  |
 |---------------------|--------------------------------------------------------------------------|
 | `bootstrap.ps1`     | Bare-machine entry point: installs git and node, then runs the installer |
-| `install.mjs`       | The installer. Deploys every folder below                                |
+| `install.mjs`       | Installer entry. Hands off to `lib/install/`                             |
+| `lib/install/`      | CLI, deploy, machine layer, and selftest                                 |
 | `fonts/`            | Vendored terminal font, installed per-user                               |
 | `fonts/optional/`   | Other faces kept here, installed only on request                         |
-| `nvim/`             | Neovim config: `lua/config/` for settings, `lua/plugins/` one per plugin |
+| `nvim/`             | Neovim config: `lua/config/` settings, `lua/config/workspace/` layout, `lua/plugins/` one per plugin |
+| `tests/`            | Installer node tests and headless Neovim runtime checks                  |
 | `tabby/config.yaml` | The terminal profile                                                     |
 | `shell/`            | bash, readline, and git                                                  |
 | `machine/`          | Optional machine layer, applied from a local manifest                    |
@@ -57,6 +59,9 @@ builtins alone with nothing to install first. Worth running before it writes any
 node install.mjs --dry-run    # report every write, perform none
 node install.mjs --list       # what is already present on this machine
 node install.mjs --selftest   # the installer's own checks
+node --test tests/installer.test.mjs
+nvim --headless -u NONE -l tests/runtime.lua
+nvim --headless -u NONE -l tests/ui.lua
 ```
 
 Every target is backed up to a timestamped `.bak-...` before it is replaced, and files that
@@ -95,7 +100,7 @@ because Windows writes it itself.
 
 ## Requirements
 
-Neovim 0.10 or later, and a `tree-sitter` CLI of 0.26 or later plus a C compiler on PATH, since
+Neovim 0.12 or later, and a `tree-sitter` CLI of 0.26.1 or later plus a C compiler on PATH, since
 parsers compile on demand. On Windows without MSVC the config points `CC` at gcc. `lazygit` backs
 the git float and `ripgrep` backs live grep. The installer reports every one of these, and
 installs them with `--install-software`.

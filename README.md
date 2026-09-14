@@ -2,7 +2,7 @@
 
 Source of truth for my machine: terminal, editor, shell, and the setup around them. The repo
 carries its own installer, so a clone provisions a machine on its own, and the `dotfiles-setup`
-skill on [agent.bairon.eth](https://8004scan.io/agents/base/45744?tab=metadata) is a remote path
+skill on [meow.femboi.eth](https://8004scan.io/agents/base/45744?tab=metadata) is a remote path
 into that same installer. Neither keeps a copy of the files, so editing this repo is all the next
 machine needs.
 

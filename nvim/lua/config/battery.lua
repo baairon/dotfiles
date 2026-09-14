@@ -18,6 +18,8 @@ local LOW = 20
 -- a couple of redraws.
 local TTL = 2000
 
+local OS = jit and jit.os
+
 local ffi_ready = false
 local function ffi()
   local ok, lib = pcall(require, 'ffi')
@@ -60,6 +62,18 @@ function M.system_battery(caps)
   return caps.SystemBatteriesPresent == 1 and caps.BatteriesAreShortTerm == 0
 end
 
+-- Flag 128 is "no system battery" and 255 is "unknown", which also sets the charging bit, so
+-- testing bit 128 turns both away before an unknown flag can read as charging. A percent of
+-- 255 is unknown as well.
+function M.from_power_status(status)
+  if bit.band(status.BatteryFlag, 128) ~= 0 or status.BatteryLifePercent == 255 then return nil end
+  return {
+    percent  = status.BatteryLifePercent,
+    plugged  = status.ACLineStatus == 1,
+    charging = bit.band(status.BatteryFlag, 8) ~= 0,
+  }
+end
+
 local function slurp(path)
   local f = io.open(path, 'r')
   if not f then return nil end
@@ -86,7 +100,7 @@ end
 
 -- whether this machine runs on a battery at all; asked once, since the hardware cannot change
 function M.detect()
-  if jit and jit.os == 'Windows' then
+  if OS == 'Windows' then
     local lib = ffi()
     if not lib then return false end
     local ok, powrprof = pcall(lib.load, 'PowrProf')
@@ -94,27 +108,21 @@ function M.detect()
     local caps = lib.new('SYSTEM_POWER_CAPABILITIES')
     return powrprof.GetPwrCapabilities(caps) ~= 0 and M.system_battery(caps)
   end
-  if jit and jit.os == 'Linux' then return linux_battery() ~= nil end
+  if OS == 'Linux' then return linux_battery() ~= nil end
   return false
 end
 
 -- { percent, plugged, charging }: plugged is on mains power, charging is the battery actually
 -- taking charge, which a full battery or one held at a charge limit is not
 function M.sample()
-  if jit and jit.os == 'Windows' then
+  if OS == 'Windows' then
     local lib = ffi()
     if not lib then return nil end
     local status = lib.new('SYSTEM_POWER_STATUS')
     if lib.C.GetSystemPowerStatus(status) == 0 then return nil end
-    -- flag 128 is "no system battery"; percent 255 is "unknown"
-    if status.BatteryFlag == 128 or status.BatteryLifePercent == 255 then return nil end
-    return {
-      percent  = status.BatteryLifePercent,
-      plugged  = status.ACLineStatus == 1,
-      charging = bit.band(status.BatteryFlag, 8) ~= 0,
-    }
+    return M.from_power_status(status)
   end
-  if jit and jit.os == 'Linux' then
+  if OS == 'Linux' then
     local dir = linux_battery()
     local percent = dir and tonumber(slurp(dir .. '/capacity'))
     if not percent then return nil end
@@ -128,11 +136,18 @@ function M.sample()
   end
 end
 
+-- lualine stops refreshing the whole statusline after a few errors in a row, so a reader that
+-- fails hides this block rather than raising. A failed detection counts as no battery and is
+-- not retried; a failed sample is no reading until the next one.
 local laptop
 function M.read()
-  if laptop == nil then laptop = M.detect() == true end
+  if laptop == nil then
+    local ok, found = pcall(M.detect)
+    laptop = ok and found == true
+  end
   if not laptop then return nil end
-  return M.sample()
+  local ok, reading = pcall(M.sample)
+  return ok and reading or nil
 end
 
 local cached, checked = nil, nil

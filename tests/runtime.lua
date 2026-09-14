@@ -156,6 +156,12 @@ check(glyph({ percent = 100 }) == string.char(0xEF, 0x89, 0x80), 'charged shows 
 check(battery.format({ percent = 42, plugged = true, charging = true }) == string.char(0xEF, 0x83, 0xA7) .. ' 42%', 'charging shows the bolt')
 check(glyph({ percent = 100, plugged = true }) == string.char(0xF3, 0xB0, 0x9A, 0xA5), 'plugged in but not charging shows the plug')
 check(battery.format(nil) == '', 'no battery formats to nothing')
+-- each band's last percent keeps its glyph and the next one moves on
+for _, edge in ipairs({ { 10, 0x84 }, { 11, 0x83 }, { 35, 0x83 }, { 36, 0x82 }, { 60, 0x82 }, { 61, 0x81 }, { 85, 0x81 }, { 86, 0x80 } }) do
+  check(glyph({ percent = edge[1] }) == string.char(0xEF, 0x89, edge[2]), edge[1] .. '% sits in its band')
+end
+check(battery.highlight({ percent = 20 }) == 'WorkspaceDiffDel', '20% on battery is already red')
+check(battery.highlight({ percent = 21 }) == 'WorkspacePanelTitle', '21% on battery is not red yet')
 check(battery.highlight({ percent = 15 }) == 'WorkspaceDiffDel', 'low on battery is red')
 check(battery.highlight({ percent = 15, plugged = true, charging = true }) == 'WorkspaceDiffAdd', 'charging is green')
 check(battery.highlight({ percent = 15, plugged = true }) == 'WorkspacePanelTitle', 'low but held on mains is not an alarm')
@@ -165,12 +171,39 @@ check(battery.highlight({ percent = 70 }) == 'WorkspacePanelTitle', 'ordinary ch
 check(battery.system_battery({ SystemBatteriesPresent = 1, BatteriesAreShortTerm = 0 }), 'a system battery is a laptop')
 check(not battery.system_battery({ SystemBatteriesPresent = 0, BatteriesAreShortTerm = 0 }), 'no battery is a PC')
 check(not battery.system_battery({ SystemBatteriesPresent = 1, BatteriesAreShortTerm = 1 }), 'a UPS is a PC')
+
+-- Windows packs "no battery" and "unknown" into the same flag byte, and unknown carries the
+-- charging bit, so neither may reach the block as a reading.
+local function power(flag, percent, line)
+  return battery.from_power_status({ BatteryFlag = flag, BatteryLifePercent = percent, ACLineStatus = line })
+end
+check(power(128, 100, 1) == nil, 'no system battery is no reading')
+check(power(255, 42, 1) == nil, 'an unknown flag is not read as charging')
+check(power(1, 255, 0) == nil, 'an unknown percent is no reading')
+local topping_up = power(8 + 1, 70, 1)
+check(topping_up.charging and topping_up.plugged and topping_up.percent == 70, 'the charging bit on mains is charging')
+local draining = power(1, 70, 0)
+check(not draining.charging and not draining.plugged, 'on battery is neither charging nor plugged')
+check(not power(0, 50, 255).plugged, 'an unknown line status is not mains')
+
 battery = fresh_battery()
 local detects, samples = 0, 0
 battery.detect = function() detects = detects + 1; return false end
 battery.sample = function() samples = samples + 1; return { percent = 50 } end
 for _ = 1, 5 do battery.read() end
 check(detects == 1 and samples == 0 and battery.read() == nil, 'a PC is detected once and never polled')
+
+-- A reader that raises would trip lualine's error limit and stop the whole statusline.
+battery = fresh_battery()
+detects = 0
+battery.detect = function() detects = detects + 1; error('no power api') end
+local hidden = true
+for _ = 1, 5 do hidden = hidden and battery.read() == nil end
+check(hidden and detects == 1, 'a failed detection hides the block and is not retried')
+battery = fresh_battery()
+battery.detect = function() return true end
+battery.sample = function() error('read failed') end
+check(battery.status() == nil, 'a failed sample is no reading rather than an error')
 
 -- Plugging in has to show up once the short hold lapses, without polling on every draw.
 local now, uv_now = 0, vim.uv.now
@@ -197,8 +230,14 @@ package.loaded['config.battery'] = battery
 dofile('nvim/lua/plugins/lualine.lua').config()
 local block = lualine_opts.sections.lualine_y[2]
 check(block.cond(), 'the block shows on a laptop')
+check(lualine_opts.sections.lualine_y[1].cond(), 'the divider shows with the block')
 local rendered = vim.api.nvim_eval_statusline(block[1](), {}).str
 check(rendered:find('42%', 1, true) ~= nil, 'the percentage renders through the statusline parser')
+local desktop = fresh_battery()
+desktop.detect = function() return false end
+dofile('nvim/lua/plugins/lualine.lua').config()
+local y = lualine_opts.sections.lualine_y
+check(not y[1].cond() and not y[2].cond(), 'a PC drops the block and its divider')
 vim.uv.now = uv_now
 package.loaded['lualine'] = nil
 print('runtime: ' .. checks .. ' checks passed')

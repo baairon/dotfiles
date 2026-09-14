@@ -139,4 +139,66 @@ local named = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_buf_set_name(named, 'C:/one/thing.lua')
 check(chrome.title(named) == nil, 'an ordinary file keeps its own path')
 check(chrome.title(999999) == nil, 'a wiped buffer names nothing')
+
+-- The battery block has to pick its glyph and colour from the reading alone, and a statusline
+-- that repaints constantly must not query the system on every draw.
+local function fresh_battery()
+  package.loaded['config.battery'] = nil
+  return require('config.battery')
+end
+local battery = fresh_battery()
+local glyph = function(s) return battery.format(s):match('^(.-) ') end
+check(glyph({ percent = 5 }) == string.char(0xEF, 0x89, 0x84), 'nearly flat shows empty')
+check(glyph({ percent = 30 }) == string.char(0xEF, 0x89, 0x83), 'low shows a quarter')
+check(glyph({ percent = 55 }) == string.char(0xEF, 0x89, 0x82), 'middle shows half')
+check(glyph({ percent = 80 }) == string.char(0xEF, 0x89, 0x81), 'high shows three quarters')
+check(glyph({ percent = 100 }) == string.char(0xEF, 0x89, 0x80), 'charged shows full')
+check(battery.format({ percent = 42, plugged = true, charging = true }) == string.char(0xEF, 0x83, 0xA7) .. ' 42%', 'charging shows the bolt')
+check(glyph({ percent = 100, plugged = true }) == string.char(0xF3, 0xB0, 0x9A, 0xA5), 'plugged in but not charging shows the plug')
+check(battery.format(nil) == '', 'no battery formats to nothing')
+check(battery.highlight({ percent = 15 }) == 'WorkspaceDiffDel', 'low on battery is red')
+check(battery.highlight({ percent = 15, plugged = true, charging = true }) == 'WorkspaceDiffAdd', 'charging is green')
+check(battery.highlight({ percent = 15, plugged = true }) == 'WorkspacePanelTitle', 'low but held on mains is not an alarm')
+check(battery.highlight({ percent = 70 }) == 'WorkspacePanelTitle', 'ordinary charge keeps the title tone')
+
+-- A desktop never shows the block, including one whose UPS reports itself as a battery.
+check(battery.system_battery({ SystemBatteriesPresent = 1, BatteriesAreShortTerm = 0 }), 'a system battery is a laptop')
+check(not battery.system_battery({ SystemBatteriesPresent = 0, BatteriesAreShortTerm = 0 }), 'no battery is a PC')
+check(not battery.system_battery({ SystemBatteriesPresent = 1, BatteriesAreShortTerm = 1 }), 'a UPS is a PC')
+battery = fresh_battery()
+local detects, samples = 0, 0
+battery.detect = function() detects = detects + 1; return false end
+battery.sample = function() samples = samples + 1; return { percent = 50 } end
+for _ = 1, 5 do battery.read() end
+check(detects == 1 and samples == 0 and battery.read() == nil, 'a PC is detected once and never polled')
+
+-- Plugging in has to show up once the short hold lapses, without polling on every draw.
+local now, uv_now = 0, vim.uv.now
+vim.uv.now = function() return now end
+battery = fresh_battery()
+battery.detect = function() return true end
+local reading = { percent = 50, plugged = false, charging = false }
+samples = 0
+battery.sample = function() samples = samples + 1; return reading end
+for _ = 1, 50 do battery.status() end
+check(samples == 1, 'repeated draws share one reading')
+reading = { percent = 50, plugged = true, charging = true }
+now = 1999
+check(not battery.status().plugged, 'a reading is held inside the window')
+now = 2000
+check(battery.status().charging and samples == 2, 'plugging in is picked up after the window')
+
+-- The component's text goes through nvim's statusline parser, where a bare '%' blanks the line.
+reading = { percent = 42, plugged = false, charging = false }
+now = 10000
+local lualine_opts
+package.loaded['lualine'] = { setup = function(opts) lualine_opts = opts end }
+package.loaded['config.battery'] = battery
+dofile('nvim/lua/plugins/lualine.lua').config()
+local block = lualine_opts.sections.lualine_y[2]
+check(block.cond(), 'the block shows on a laptop')
+local rendered = vim.api.nvim_eval_statusline(block[1](), {}).str
+check(rendered:find('42%', 1, true) ~= nil, 'the percentage renders through the statusline parser')
+vim.uv.now = uv_now
+package.loaded['lualine'] = nil
 print('runtime: ' .. checks .. ' checks passed')

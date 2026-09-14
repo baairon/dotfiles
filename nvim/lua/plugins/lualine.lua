@@ -47,6 +47,11 @@ return {
         MONTHS[t.month], t.day, h == 0 and 12 or h, t.min, t.hour < 12 and 'am' or 'pm')
     end
 
+    -- The battery is a separate fact from the clock, so it takes its own block before it, and
+    -- both the block and its divider drop out on a machine that reports no battery.
+    local battery = require('config.battery')
+    local function has_battery() return battery.status() ~= nil end
+
     require('lualine').setup {
       options = {
         theme = theme,
@@ -78,7 +83,15 @@ return {
           end,
         } },
         lualine_x = { { 'filetype', color = 'WorkspaceTabInactive' } },
-        lualine_y = {},
+        lualine_y = {
+          vim.tbl_extend('force', divider, { cond = has_battery }),
+          {
+            -- a bare '%' is a statusline format code, and one invalid code blanks the whole line
+            function() return (battery.format(battery.status()):gsub('%%', '%%%%')) end,
+            color = function() return battery.highlight(battery.status()) end,
+            cond = has_battery,
+          },
+        },
         lualine_z = { divider, { clock, color = 'WorkspacePanelTitle' } },
       },
       inactive_sections = {

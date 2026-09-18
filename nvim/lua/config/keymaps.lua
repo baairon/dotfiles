@@ -27,6 +27,13 @@ map('n', '<leader>v', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdow
 map({ 'n', 'i' }, '<A-v>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
 map({ 'n', 'i' }, '<A-V>', '<cmd>MarkdownPreviewToggle<cr>', { desc = 'Toggle markdown preview' })
 
+-- Global: open the current file in the default browser. Markdown buffers get a
+-- buffer-local <A-p> below (MarkdownPreview) which takes precedence, so READMEs
+-- keep their preview while every other file type opens in the browser.
+map({ 'n', 'i' }, '<A-p>', function()
+  require('config.browser').open_current_in_browser()
+end, { desc = 'Open file in default browser' })
+
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'markdown',
   callback = function(args)

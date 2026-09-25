@@ -4,6 +4,7 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 require('config.options')
+require('config.title').setup()
 require('config.theme')
 
 local lazypath = vim.fn.stdpath('data') .. '/lazy/lazy.nvim'

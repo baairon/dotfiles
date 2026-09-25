@@ -240,4 +240,26 @@ local y = lualine_opts.sections.lualine_y
 check(not y[1].cond() and not y[2].cond(), 'a PC drops the block and its divider')
 vim.uv.now = uv_now
 package.loaded['lualine'] = nil
+
+-- The tab is labelled by the terminal title, so it has to follow every cd nvim makes, in the
+-- same ~ form the shell prompt gives it, and survive the statusline parser it goes through.
+local title = require('config.title')
+local home = vim.fn.expand('~')
+check(title.text(home) == '~', 'home is ~')
+check(title.text(home .. '/dev/dotfiles') == '~/dev/dotfiles', 'a folder under home is written from ~')
+title.setup()
+local title_events = #vim.api.nvim_get_autocmds({ group = 'WorkspaceTitle' })
+title.setup()
+check(#vim.api.nvim_get_autocmds({ group = 'WorkspaceTitle' }) == title_events, 'title setup does not duplicate events')
+check(vim.o.title, 'nvim sets the terminal title')
+local shown = function() return vim.api.nvim_eval_statusline(vim.o.titlestring, { maxwidth = 1000 }).str end
+local repo = vim.fn.getcwd()
+local odd = vim.fn.tempname() .. '-100%'
+vim.fn.mkdir(odd, 'p')
+vim.cmd.cd(vim.fn.fnameescape(odd))
+check(shown() == title.text(vim.fn.getcwd()), 'a cd moves the title')
+check(shown():sub(-5) == '-100%', 'a % in a folder name stays literal')
+vim.cmd.cd(vim.fn.fnameescape(repo))
+check(shown() == title.text(repo), 'the title follows the cd back')
+vim.fn.delete(odd, 'd')
 print('runtime: ' .. checks .. ' checks passed')

@@ -35,7 +35,23 @@ local function check(ok, label) assert(ok, label); checks = checks + 1 end
 local ok, err = pcall(function()
   call('nvim_ui_attach', 120, 40, { rgb = true, ext_linegrid = true })
   lua([[local root = ...; vim.opt.rtp:prepend(root .. '/nvim'); require('config.options')
-    vim.env.NVIM_DEV_DIR = root .. '/tests'
+    local fixture = vim.fn.expand(root .. '/tests/splash-fixture')
+    vim.env.NVIM_DEV_DIR = fixture
+    local isdirectory, readdir = vim.fn.isdirectory, vim.fn.readdir
+    vim.fn.isdirectory = function(path)
+      if path == fixture or path:find(fixture .. '/fixture-', 1, true) == 1 then return 1 end
+      return isdirectory(path)
+    end
+    vim.fn.readdir = function(path)
+      if path == fixture then
+        local names = {}
+        for i = 1, 30 do names[i] = string.format('fixture-%02d', i) end
+        return names
+      end
+      return readdir(path)
+    end
+    vim.g.global_page_down = 0
+    vim.keymap.set('n', '<PageDown>', function() vim.g.global_page_down = vim.g.global_page_down + 1 end)
     require('config.splash').show(function() end)]], vim.fn.getcwd())
 
   local function snapshot()
@@ -59,11 +75,15 @@ local ok, err = pcall(function()
     check(settled, 'grid settles at ' .. w .. 'x' .. h)
   end
 
-  -- The splash reads keys through buffer-local mappings, so input has to be remapped ('m')
-  -- and the typeahead flushed before the call returns ('x') or the next snapshot races the
-  -- redraw the mapping triggers.
+  -- The splash reads keys through buffer-local mappings, so input has to be remapped ('m'),
+  -- marked as typed ('t'), and flushed before the call returns ('x').
   local function press(keys)
-    lua([[vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(..., true, false, true), 'mx', false)]], keys)
+    return lua([[vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(..., true, false, true), 'mtx', false)
+      local marker = string.char(0xE2, 0x9D, 0xAF)
+      for _, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        if line:find(marker, 1, true) then return line end
+      end
+      return '']], keys)
   end
 
   -- The splash is a screen, not a document. At every size the float covers the whole grid,
@@ -84,6 +104,15 @@ local ok, err = pcall(function()
     return lua([[local needle = ...
       local screen = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
       return screen:find(needle, 1, true) ~= nil]], text)
+  end
+
+  local function selected(label)
+    local line = lua([[local marker = ...
+      for _, text in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        if text:find(marker, 1, true) then return text end
+      end
+      return '']], string.char(0xE2, 0x9D, 0xAF))
+    return line:find(label, 1, true) ~= nil
   end
 
   -- A full wrap of the four-row menu and one step back. The reported symptom was the menu
@@ -122,6 +151,11 @@ local ok, err = pcall(function()
 
   resize(120, 40)
   anchored('restored 120x40')
+  check(press('<PageUp>'):find('Launch', 1, true), 'menu page jumps to the first item')
+  check(press('<PageUp>'):find('Launch', 1, true), 'menu page stops at the first item')
+  check(press('<PageDown>'):find('Quit', 1, true), 'menu page jumps to the last item')
+  check(press('<PageDown>'):find('Quit', 1, true), 'menu page stops at the last item')
+  anchored('menu after page keys')
 
   -- The picker centres its own block and pins a help line at rows - 3, so it needs the same
   -- treatment. Esc returns to the menu from here; from the menu it would close the splash.
@@ -129,8 +163,20 @@ local ok, err = pcall(function()
   press('n')
   check(shows('~/dev'), 'n opens the directory picker')
   anchored('picker 120x40')
+  check(selected('fixture-01'), 'picker starts at the first directory')
+  check(press('<PageDown>'):find('fixture-18', 1, true), 'picker moves one visible page instantly')
+  anchored('picker after first page')
+  check(press('<PageDown>'):find('fixture-30', 1, true), 'picker page clamps at the end')
+  check(press('<PageDown>'):find('fixture-30', 1, true), 'picker page stops at the last item')
+  check(press('<PageUp>'):find('fixture-13', 1, true), 'picker moves one visible page up instantly')
+  check(press('<PageUp>'):find('Back', 1, true), 'picker page clamps at the beginning')
+  check(press('<PageUp>'):find('Back', 1, true), 'picker page stops at the first item')
+  check(lua([[return vim.g.global_page_down]]) == 0, 'splash page mapping wins over a global mapping')
   resize(48, 14)
   anchored('picker 48x14')
+  check(press('<PageDown>'):find('fixture-04', 1, true), 'short grid moves four visible items')
+  check(press('<PageDown>'):find('fixture-08', 1, true), 'repeated pages stay instant')
+  check(press('<PageUp>'):find('fixture-04', 1, true), 'short grid pages upward')
   navigate('picker 48x14')
   press('<Esc>')
   check(shows('Launch'), 'esc returns to the menu')

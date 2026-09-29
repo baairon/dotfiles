@@ -362,6 +362,16 @@ local function render()
   vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 1, leftcol = 0, skipcol = 0 }) end)
 end
 
+local function page_move(d)
+  if committed then return end
+  status = nil
+  local count = view == "menu" and #MENU or #dir_items
+  local current = view == "menu" and sel or dir_sel
+  local visible = view == "menu" and #MENU or select(2, dirs_layout(math.max(1, vim.o.lines - 1), count))
+  local target = math.max(1, math.min(count, current + d * visible))
+  if view == "menu" then sel = target else dir_sel = target end
+end
+
 local function quit_nvim()
   done = true
   vim.schedule(function() pcall(vim.cmd, "qa") end)
@@ -614,6 +624,8 @@ function M.show(on_done)
   kmap("<Down>", function() move_sel(1) end)
   kmap("k", function() move_sel(-1) end)
   kmap("<Up>", function() move_sel(-1) end)
+  kmap("<PageUp>", function() page_move(-1) end)
+  kmap("<PageDown>", function() page_move(1) end)
   kmap("<Esc>", go_back)
   kmap("q", function()
     if view ~= "menu" then view = "menu" else shortcut("q") end

@@ -97,6 +97,63 @@ respond(6, patch)
 check(vim.api.nvim_get_current_buf() ~= first, 'wiped diff can be reopened')
 vim.system = system
 
+-- A tab opened from a pane hands focus back to that pane when it closes. The pane is found again
+-- by what its buffer advertises, so a tree toggled since still gets it and one closed since does not.
+local tabs = require('config.workspace.terminal')
+local workspace_open = dofile('nvim/lua/plugins/neo-tree.lua').opts.commands.workspace_open
+local focused = vim.api.nvim_get_current_win
+vim.api.nvim_win_set_var(top, 'workspace_winpanel', 'top')
+local function pane(marker, value)
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.b[b][marker] = value
+  vim.cmd('topleft vsplit')
+  vim.api.nvim_win_set_buf(0, b)
+  return focused()
+end
+local function open_from(win, source)
+  local path = vim.fn.tempname() .. '.txt'
+  vim.fn.writefile({ 'fixture' }, path)
+  vim.api.nvim_set_current_win(win)
+  workspace_open({ name = source, tree = { get_node = function() return { type = 'file', path = path } end } })
+  return vim.api.nvim_get_current_buf()
+end
+local tree = pane('neo_tree_source', 'filesystem')
+local rail = pane('neo_tree_source', 'git_status')
+local kept = open_from(tree, 'filesystem')
+check(focused() == top and vim.b[kept].workspace_origin == 'filesystem', 'the tree opens into the top panel and tags the tab')
+open_from(tree, 'filesystem')
+tabs.close_tab()
+check(focused() == tree, 'closing a tab opened from the tree focuses the tree')
+check(vim.api.nvim_win_get_buf(top) == kept, 'the top panel still moves on to another tab')
+open_from(rail, 'git_status')
+tabs.close_tab()
+check(focused() == rail, 'a tab opened from the git rail returns to the rail')
+vim.api.nvim_set_current_win(top)
+vim.cmd('enew')
+vim.b.workspace_panel = 'top'
+tabs.close_tab()
+check(focused() == top, 'a tab opened any other way keeps focus in the panel')
+vim.api.nvim_win_close(tree, true)
+local toggled = pane('neo_tree_source', 'filesystem')
+vim.api.nvim_set_current_win(top)
+tabs.close_tab()
+check(focused() == toggled, 'a tree toggled since is found in its new window')
+vim.api.nvim_win_close(toggled, true)
+open_from(top, 'filesystem')
+tabs.close_tab()
+check(focused() == top, 'a tree closed since stays closed')
+local changes = pane('workspace_gitstat', true)
+processes = {}
+vim.system = function(argv, opts, callback) processes[#processes + 1] = { callback = callback } end
+diff.open_file_diff('pane.txt', false, 'C:/one')
+respond(1, patch)
+check(focused() == top and vim.b.workspace_origin == 'gitstat', 'a diff opened from the changes panel is tagged with it')
+tabs.close_tab()
+check(focused() == changes, 'closing that diff returns to the changes panel')
+vim.system = system
+vim.api.nvim_set_current_win(top)
+vim.cmd('only')
+
 local spec = dofile('nvim/lua/plugins/smear-cursor.lua')
 check(not spec.opts.smear_terminal_mode and not spec.opts.smear_insert_mode, 'native cursor in terminal and insert modes')
 check(vim.tbl_contains(spec.opts.filetypes_disabled, 'splash'), 'splash excluded from animation')

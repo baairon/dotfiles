@@ -155,6 +155,8 @@ function M.open_file_diff(relpath, is_new, root)
   local request = {}
   requests[top] = request
   local origin_win = vim.api.nvim_get_current_win()
+  -- taken now, while the pane that asked is still current, so closing the diff can return there
+  local origin = require('config.workspace.terminal').pane_of(origin_win)
   local original_buf = vim.api.nvim_win_get_buf(top)
   local key = diff_key(root, relpath)
   local revision = {}
@@ -178,6 +180,7 @@ function M.open_file_diff(relpath, is_new, root)
         return
       end
       local buf = diff_buf(relpath, root, is_new)
+      vim.b[buf].workspace_origin = origin
       render_diff(buf, relpath, out)
       vim.api.nvim_win_set_buf(top, buf)
       -- A slow diff must not steal focus from a pane entered while it was loading.

@@ -93,6 +93,26 @@ local function hop_or_close(win, panel, exclude)
   return false
 end
 
+-- The panes a tab can be opened from, named by the marker each one's buffer already advertises:
+-- neo-tree's source for the explorer and the git rail, gitstat's flag for the changes panel. A
+-- tab keeps the name rather than a window, because toggling a tree replaces its window.
+local function pane_of(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  local ok, src = pcall(function() return vim.b[buf].neo_tree_source end)
+  if ok and src then return src end
+  local okg, stat = pcall(function() return vim.b[buf].workspace_gitstat end)
+  if okg and stat then return 'gitstat' end
+  return nil
+end
+
+-- this tabpage only, since focusing a window in another one would switch tabpages as well
+local function pane_win(name)
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if pane_of(w) == name then return w end
+  end
+  return nil
+end
+
 local function close_tab()
   local panel = vim.b.workspace_panel
   if not panel then
@@ -106,6 +126,8 @@ local function close_tab()
   end
   local cur = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
+  -- read first, because the buffer's variables are wiped along with it
+  local origin = vim.b[cur].workspace_origin
   hop_or_close(win, panel, cur)
   if vim.bo[cur].buftype == 'terminal' then
     local okc, chan = pcall(function() return vim.bo[cur].channel end)
@@ -113,6 +135,13 @@ local function close_tab()
   else
     pcall(vim.api.nvim_buf_delete, cur, { force = true })
   end
+  -- A tab opened from a pane hands focus back to it, so working through a tree is open, read,
+  -- close, and the next file is one keystroke away. It happens here rather than scheduled:
+  -- neo-tree's follow fires a beat later and stands down while the tree has focus, so the
+  -- tree's cursor stays on the file that just closed instead of chasing the tab the panel moved
+  -- on to. A pane closed since is left closed.
+  local back = origin and pane_win(origin)
+  if back then vim.api.nvim_set_current_win(back) end
   require('config.layout').refresh_winbars()
 end
 
@@ -129,4 +158,5 @@ return {
   git_bash = git_bash, panel_bufs = panel_bufs, term_name = term_name,
   spawn_term = spawn_term, jump = jump, add_term_to_panel = add_term_to_panel,
   hop_or_close = hop_or_close, close_tab = close_tab, jump_to_tab = jump_to_tab,
+  pane_of = pane_of,
 }

@@ -32,6 +32,9 @@ return {
         vim.cmd('edit ' .. vim.fn.fnameescape(path))
         local ok, wp = pcall(vim.api.nvim_win_get_var, win, 'workspace_winpanel')
         if ok and wp then vim.b.workspace_panel = wp end
+        -- the source's name is what its tree buffer advertises as neo_tree_source, which is how
+        -- closing this tab finds the tree again to hand focus back
+        vim.b.workspace_origin = state.name
       end,
     },
     default_component_configs = {

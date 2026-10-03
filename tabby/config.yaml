@@ -9,7 +9,6 @@ hotkeys:
   copy-current-path: []
   ctrl-c: []
   paste:
-    - Ctrl-Shift-V
     - Shift-Insert
   select-all:
     - Ctrl-Shift-A
@@ -193,7 +192,10 @@ hotkeys:
   pin-tab: []
 terminal:
   profile: local:git-bash
-  frontend: xterm-webgl
+  # The WebGL renderer draws styled and dimmed cell backgrounds as solid black boxes over a
+  # translucent window (visible in full-screen TUIs like soundcli). The DOM/canvas frontend
+  # composites those backgrounds correctly, so it stays on while the window has any vibrancy.
+  frontend: xterm
   searchOptions: {}
   # Catppuccin Mocha, transcribed from the upstream palette rather than installed:
   # community-color-schemes is blacklisted below, so there is no scheme picker to
@@ -240,8 +242,12 @@ accessibility:
   animations: false
 appearance:
   frame: thin
+  # Acrylic (Fluent) blur, kept on. opacity is the terminal background's own alpha: at 1.0 the
+  # window is fully solid, so the acrylic material behind it does not show through. Drop opacity
+  # toward ~0.9 if the frosted acrylic look should be visible.
   vibrancy: true
-  opacity: 0.6
+  vibrancyType: fluent
+  opacity: 1
   tabsInFullscreen: true
   dock: top
   dockScreen: current
@@ -269,4 +275,10 @@ profileDefaults:
     type: local
     options:
       env: {}
+      # A new tab inherits the previous tab's working directory unless the profile pins
+      # one, so without this every tab opened after a cd starts there instead of home.
+      # The installer rewrites __DOTFILES_HOME__ to this machine's home at deploy time:
+      # Tabby validates cwd with statSync and expands neither ~ nor environment variables,
+      # so the literal path has to be baked in, the same way PATH is built in .bashrc.
+      cwd: __DOTFILES_HOME__
     behaviorOnSessionEnd: keep

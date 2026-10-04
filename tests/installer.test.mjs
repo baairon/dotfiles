@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { deployFile, deployDirectoryLink } from '../lib/install/files.mjs';
 import { parseArgs } from '../lib/install/cli.mjs';
-import { readShellSource } from '../lib/install/deploy.mjs';
+import { readShellSource, patchTabbyResize } from '../lib/install/deploy.mjs';
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dotfiles-test-'));
@@ -70,6 +70,16 @@ test('link failure falls back to a copy; copy failure restores the original dire
   assert.equal(fs.readFileSync(path.join(source, 'new'), 'utf8'), 'new');
   assert.match(deployDirectoryLink(source, target, false, noLink).msg, /copied/);
   assert.equal(fs.readFileSync(path.join(target, 'new'), 'utf8'), 'new');
+});
+
+test('tab resize patch replays the current size once, then is a no-op', () => {
+  const stale = 'setTimeout(() => {\r\n    var _a;\r\n    (_a = this.session) === null || _a === void 0 ? void 0 : _a.resize(columns, rows);\r\n}, 1000);';
+  const first = patchTabbyResize(stale);
+  assert.equal(first.status, 'patched');
+  assert.match(first.body, /_a\.resize\(this\.size\.columns, this\.size\.rows\);\r\n\}, 1000\);/);
+  assert.deepEqual(patchTabbyResize(first.body), { status: 'already', body: first.body });
+  assert.equal(patchTabbyResize('session.resize(columns, rows);').status, 'unknown');
+  assert.equal(patchTabbyResize(stale + stale).status, 'unknown');
 });
 
 test('invalid repo arguments fail before deployment; flags retain their defaults', () => {

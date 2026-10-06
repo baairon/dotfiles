@@ -14,7 +14,7 @@ Neither keeps a copy of the files, so editing this repo is all the next machine 
 | `lib/install/`      | CLI, deploy, machine layer, and selftest                                 |
 | `fonts/`            | Vendored terminal font, installed per-user                               |
 | `fonts/optional/`   | Other faces kept here, installed only on request                         |
-| `nvim/`             | Neovim config: `lua/config/` settings, `lua/config/workspace/` layout, `lua/plugins/` one per plugin, `bin/edit.lua` the `$EDITOR` of its terminals |
+| `nvim/`             | Neovim config: `lua/config/` settings, `lua/config/workspace/` layout, `lua/plugins/` one per plugin |
 | `tests/`            | Installer node tests and headless Neovim runtime checks                  |
 | `tabby/config.yaml` | The terminal profile                                                     |
 | `shell/`            | bash, readline, and git                                                  |
@@ -165,14 +165,3 @@ modifier the click reached that program as well, and anything it redrew under th
 between press and release cost the link. Ctrl-click inside Claude Code is Claude Code's own: it
 opens half a second later so a double-click can still select a word, and a second click inside
 that half second cancels it.
-
-## Editing from a workspace terminal
-
-Inside an nvim terminal, `$EDITOR` and `$VISUAL` are `nvim/bin/edit.lua` run through `nvim -l`.
-A program that opens an editor there, `git commit` or Claude Code's `/plan open`, would otherwise
-start a second nvim inside one pane of the first, where the outer one still takes `Esc Esc` and
-the Alt chords. The shim hands the file to the nvim that owns the terminal, which opens it as a
-tab in the top panel, and blocks until that tab closes, so the program waits for the edit the
-way it would for an editor of its own. Claude Code's background sessions run under a daemon
-rather than in a terminal, so for them it falls back to whichever nvim has focus. With no nvim
-to hand the file to, it starts one in place.

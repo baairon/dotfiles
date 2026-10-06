@@ -14,19 +14,8 @@
 # the terminal has.
 
 # --- environment -----------------------------------------------------------------------
-# Inside a Neovim terminal, $NVIM names the nvim that owns it, and a program launching $EDITOR
-# there (git commit, Claude Code's /plan open) would start a second nvim inside that one pane,
-# where the outer one still takes Esc Esc and the Alt chords for itself. nvim/bin/edit.lua hands
-# the file to the outer nvim instead and blocks until it is closed, so the program still waits
-# for the edit. The path goes in with forward slashes and double quotes, which cmd.exe (how
-# Windows programs run the editor) and sh (how git runs it) both read the same way.
 export EDITOR=nvim
-if [ -n "$NVIM" ]; then
-  _edit="${LOCALAPPDATA:-${XDG_CONFIG_HOME:-$HOME/.config}}/nvim/bin/edit.lua"
-  [ -f "$_edit" ] && EDITOR="nvim -l \"${_edit//\\//}\""
-  unset _edit
-fi
-export VISUAL="$EDITOR"
+export VISUAL=nvim
 
 # -R keeps colour, -F skips the pager for output that already fits, -X leaves that output
 # on the screen instead of wiping it with the alternate screen buffer.

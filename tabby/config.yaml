@@ -237,7 +237,13 @@ terminal:
   cursorBlink: false
   font: CozetteVector
 ssh: {}
-clickableLinks: {}
+# Shift-click opens links. On Windows, Shift is the one modifier xterm.js keeps for its own
+# selection instead of reporting the click to a program holding the mouse (nvim, Claude Code's
+# fullscreen view), so nothing redraws the row and the link opens on the first press. With no
+# modifier the click reached that program too, and xterm.js drops a link whose row is redrawn
+# between press and release. Ctrl-click inside Claude Code stays Claude Code's own opener.
+clickableLinks:
+  modifier: shiftKey
 accessibility:
   animations: false
 appearance:

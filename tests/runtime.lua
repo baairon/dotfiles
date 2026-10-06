@@ -319,4 +319,67 @@ check(shown():sub(-5) == '-100%', 'a % in a folder name stays literal')
 vim.cmd.cd(vim.fn.fnameescape(repo))
 check(shown() == title.text(repo), 'the title follows the cd back')
 vim.fn.delete(odd, 'd')
+
+-- A program in a workspace terminal hands its file to this nvim instead of nesting a second one,
+-- and is let go once the tab it opened closes, with the panel back on the terminal it waits in.
+-- The real shim runs against this instance as its server.
+local handoff = require('config.workspace.handoff')
+local shim = vim.fn.getcwd() .. '/nvim/bin/edit.lua'
+local server = vim.v.servername ~= '' and vim.v.servername or vim.fn.serverstart()
+-- Named, because :edit reuses an empty unnamed buffer instead of opening a new one, and a real
+-- terminal never is one. The decoy is the newer tab, so close_tab hops there first.
+local function panel_tab(name)
+  local b = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(b, name)
+  vim.b[b].workspace_panel = 'top'
+  return b
+end
+local waiting = panel_tab('term://program')
+panel_tab('decoy')
+vim.api.nvim_set_current_win(top)
+vim.api.nvim_win_set_buf(top, waiting)
+local plan = vim.fn.fnamemodify(vim.fn.tempname() .. '.md', ':p')
+vim.fn.writefile({ '# plan' }, plan)
+local function plan_buf()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.fs.normalize(vim.api.nvim_buf_get_name(b)) == vim.fs.normalize(plan) then return b end
+  end
+end
+local function plan_shown() local b = plan_buf(); return b ~= nil and vim.api.nvim_win_get_buf(top) == b end
+local function hand(env)
+  local result
+  vim.system({ vim.v.progpath, '-l', shim, plan }, { env = env }, function(r) result = r end)
+  return function() return result end
+end
+local finished = hand({ NVIM = server })
+wait(plan_shown)
+check(vim.b[plan_buf()].workspace_panel == 'top', 'a handed file opens as a top panel tab')
+vim.wait(100, function() return false end)
+check(finished() == nil, 'the program waits while the tab is open')
+tabs.close_tab()
+wait(function() return finished() ~= nil end)
+check(finished().code == 0, 'closing the tab lets the program go')
+check(vim.api.nvim_win_get_buf(top) == waiting, 'the panel goes back to the terminal the program waits in')
+
+-- A background session's $NVIM names an nvim long gone, so the shim falls back to the one with
+-- focus, which records its address on focus and clears only its own entry when focus leaves.
+local state = vim.fn.tempname()
+vim.env.XDG_STATE_HOME = state
+handoff.record()
+local focus = vim.fn.stdpath('state') .. '/focused-server'
+check(vim.fn.readfile(focus)[1] == server, 'the focused nvim records its address')
+finished = hand({ NVIM = vim.fn.tempname(), XDG_STATE_HOME = state })
+wait(plan_shown)
+vim.api.nvim_win_set_buf(top, waiting)
+wait(function() return finished() ~= nil end)
+check(finished().code == 0, 'a dead $NVIM falls back to the focused nvim, and moving off the tab ends the edit')
+vim.fn.writefile({ 'elsewhere' }, focus)
+handoff.forget()
+check(vim.fn.filereadable(focus) == 1, "losing focus leaves another nvim's entry alone")
+vim.fn.writefile({ server }, focus)
+handoff.forget()
+check(vim.fn.filereadable(focus) == 0, 'losing focus clears its own entry')
+vim.env.XDG_STATE_HOME = nil
+vim.fn.delete(state, 'rf')
+vim.fn.delete(plan)
 print('runtime: ' .. checks .. ' checks passed')

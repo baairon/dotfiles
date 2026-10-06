@@ -16,6 +16,16 @@
 # --- environment -----------------------------------------------------------------------
 export EDITOR=nvim
 export VISUAL=nvim
+# On Windows, programs that hand a file over for reading (Claude Code's /plan open) get Notepad:
+# a nested nvim inside a terminal of the workspace nvim exits at once there, and a window of its
+# own is what a plan wants anyway. Claude Code reads VISUAL before EDITOR, and git reads VISUAL
+# before EDITOR too, so GIT_EDITOR keeps commit messages in nvim in the terminal.
+case "$OSTYPE" in
+  msys*|cygwin*)
+    export VISUAL=notepad
+    export GIT_EDITOR=nvim
+    ;;
+esac
 
 # -R keeps colour, -F skips the pager for output that already fits, -X leaves that output
 # on the screen instead of wiping it with the alternate screen buffer.

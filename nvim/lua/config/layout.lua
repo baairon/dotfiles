@@ -384,6 +384,7 @@ autocmd('TermClose', {
 })
 
 pcall(function() require('config.gitstat').setup() end)
+pcall(function() require('config.workspace.nested').setup() end)
 
 -- boot into the splash on a bare `nvim` or `nvim <dir>`, never with file args
 autocmd('VimEnter', {

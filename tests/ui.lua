@@ -117,12 +117,13 @@ local ok, err = pcall(function()
 
   -- A full wrap of the four-row menu and one step back. The reported symptom was the menu
   -- creeping upward on the keypress after a resize, so every size navigates before moving on.
-  local function navigate(label)
+  -- The picker moves on the arrows alone, since its letters type a folder's name.
+  local function navigate(label, down, up)
     for i = 1, 4 do
-      press('j')
+      press(down or 'j')
       anchored(label .. ' down ' .. i)
     end
-    press('k')
+    press(up or 'k')
     anchored(label .. ' up')
   end
 
@@ -177,7 +178,11 @@ local ok, err = pcall(function()
   check(press('<PageDown>'):find('fixture-04', 1, true), 'short grid moves four visible items')
   check(press('<PageDown>'):find('fixture-08', 1, true), 'repeated pages stay instant')
   check(press('<PageUp>'):find('fixture-04', 1, true), 'short grid pages upward')
-  navigate('picker 48x14')
+  navigate('picker 48x14', '<Down>', '<Up>')
+  -- every fixture starts with f, so typing it opens nothing and scrolls back to the first
+  check(press('f'):find('fixture-01', 1, true), 'a letter every folder shares selects the first of them')
+  check(shows('~/dev/fixture-'), 'the title spells out what they share')
+  anchored('picker typed 48x14')
   press('<Esc>')
   check(shows('Launch'), 'esc returns to the menu')
   anchored('menu after picker')

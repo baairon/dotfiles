@@ -319,6 +319,82 @@ check(shown():sub(-5) == '-100%', 'a % in a folder name stays literal')
 vim.cmd.cd(vim.fn.fnameescape(repo))
 check(shown() == title.text(repo), 'the title follows the cd back')
 vim.fn.delete(odd, 'd')
+
+-- The New Session picker opens a folder from the letters that set it apart, and the actions that
+-- gave up their lowercase keys for that answer to capitals. The folders are real, so the cd a pick
+-- ends in really happens, and the history it writes goes to a scratch data dir.
+local dev = vim.fn.tempname()
+for _, name in ipairs({ 'Apex', 'bolt', 'crab', 'crate-one', 'crate-two', 'drift', 'drift-kit', 'jig' }) do
+  vim.fn.mkdir(dev .. '/' .. name, 'p')
+end
+local data, stdpath, list_uis = vim.fn.tempname(), vim.fn.stdpath, vim.api.nvim_list_uis
+vim.fn.mkdir(data, 'p')
+vim.env.NVIM_DEV_DIR = dev
+-- the history file's path is fixed when the module loads
+vim.fn.stdpath = function(kind) return kind == 'data' and data or stdpath(kind) end
+package.loaded['config.splash'] = nil
+local splash = require('config.splash')
+vim.fn.stdpath = stdpath
+vim.api.nvim_list_uis = function() return { {} } end
+local opened
+local function key(lhs)
+  for _, map in ipairs(vim.api.nvim_buf_get_keymap(0, 'n')) do
+    if map.lhs == lhs then map.callback(); return end
+  end
+  error('missing splash key ' .. lhs)
+end
+local function settle() vim.wait(200, function() return opened ~= nil end) end
+-- the folder a pick lands in, or nil while the picker is still up
+local function pick(...)
+  opened = nil
+  splash.show(function(launched) opened = launched and vim.fn.fnamemodify(vim.fn.getcwd(), ':t') or false end)
+  key('n')
+  for _, k in ipairs({ ... }) do key(k) end
+  settle()
+  return opened
+end
+local function screen() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n') end
+local function selection()
+  for _, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+    if line:find(string.char(0xE2, 0x9D, 0xAF), 1, true) then return line end
+  end
+  return ''
+end
+local function close() key('<Esc>'); key('<Esc>'); settle() end
+check(pick('b') == 'bolt', 'a first letter no other folder has opens it')
+check(pick('a') == 'Apex', 'letters match whatever case the folder has')
+check(pick('j') == 'jig', 'j types in the picker instead of moving')
+check(pick('c') == nil and selection():find('crab', 1, true), 'a shared letter selects the first match and waits')
+check(screen():find('~/dev/cra', 1, true), 'the title spells out what the matches share')
+key('b')
+settle()
+check(opened == 'crab', 'the letter that differs opens it')
+check(pick('c', 't', 't') == 'crate-two', 'letters every match shares never need typing')
+check(pick('c', 'r', 'a', 't', 'e', '-', 'o') == 'crate-one', 'a name typed out in full opens too')
+check(pick('d', '<CR>') == 'drift', 'enter opens the name another one continues')
+check(pick('d', '-') == 'drift-kit', 'and the next letter opens the one continuing it')
+check(pick('c', 't', '<BS>', 'b') == 'crab', 'backspace widens the choice again')
+check(pick('c', '<Down>', 'b') == 'bolt', 'a move starts the typing over')
+check(pick('z') == nil and screen():find('no match', 1, true), 'a letter no folder has opens nothing')
+close()
+local asked, cloned, revealed
+local confirm, input, ui_open = vim.fn.confirm, vim.fn.input, vim.ui.open
+vim.fn.confirm = function(msg) asked = msg; return 2 end
+vim.fn.input = function() cloned = true; return '' end
+vim.ui.open = function(path) revealed = path end
+check(pick('D', 'C', 'E') == nil, 'the capitals open no folder')
+check(asked == 'Delete Apex?', 'D still asks before deleting the selected folder')
+check(cloned, 'C still asks what to clone')
+check(revealed and vim.fs.normalize(revealed) == vim.fs.normalize(dev), 'E still shows the dev folder')
+close()
+vim.fn.confirm, vim.fn.input, vim.ui.open = confirm, input, ui_open
+vim.api.nvim_list_uis = list_uis
+vim.env.NVIM_DEV_DIR = nil
+-- Windows cannot remove the process cwd, and the last pick left it inside the scratch folders
+vim.cmd.cd(vim.fn.fnameescape(repo))
+vim.fn.delete(dev, 'rf')
+vim.fn.delete(data, 'rf')
+
 -- A nested nvim in a workspace terminal gets Esc straight through while it runs, so a double Esc
 -- typed there cannot leave terminal mode out here and send its :q to the terminal pane.
 local nested = require('config.workspace.nested')

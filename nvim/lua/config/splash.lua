@@ -73,6 +73,8 @@ local view = "menu"
 local dev_dirs = {}
 local dir_items = {}
 local dir_sel = 1
+-- what the picker's type-to-open has taken so far, lowercased
+local typed = ""
 local committed = false
 local busy = nil
 local status = nil
@@ -173,7 +175,9 @@ local function build_dir_items()
     { kind = "back", icon = IC.back, label = "Back", hl = "SplashDim" },
   }
   for _, name in ipairs(dev_dirs) do
-    dir_items[#dir_items + 1] = { kind = "dir", icon = IC.dir, label = name, hl = "SplashItem", name = name }
+    dir_items[#dir_items + 1] = {
+      kind = "dir", icon = IC.dir, label = name, hl = "SplashItem", name = name, key = name:lower(),
+    }
   end
 end
 
@@ -186,6 +190,7 @@ end
 
 local function scan_dev_dirs()
   dev_dirs = {}
+  typed = "" -- it was matched against the list this replaces
   if vim.fn.isdirectory(DEV_DIR) == 1 then
     local entries = vim.fn.readdir(DEV_DIR)
     table.sort(entries)
@@ -198,6 +203,37 @@ local function scan_dev_dirs()
   build_dir_items()
 end
 
+-- type-to-open goes by what a name starts with, compared without case: the rows of
+-- dir_items whose folder begins with `prefix`
+local function dirs_matching(prefix)
+  local out = {}
+  for i, it in ipairs(dir_items) do
+    if it.kind == "dir" and it.key:sub(1, #prefix) == prefix then out[#out + 1] = i end
+  end
+  return out
+end
+
+-- how far those rows agree, which is as much of the name as has stopped being a choice. it is
+-- drawn as well as compared, so it never ends inside a multibyte character
+local function shared_stem(matches)
+  local first = dir_items[matches[1]]
+  if not first then return "" end
+  local n = #first.key
+  for i = 2, #matches do
+    local key = dir_items[matches[i]].key
+    local same = 0
+    while same < n and key:byte(same + 1) == first.key:byte(same + 1) do same = same + 1 end
+    n = same
+  end
+  -- lower() maps ASCII only, so key and name keep the same bytes past it
+  while n > 0 and n < #first.key do
+    local b = first.key:byte(n + 1)
+    if b < 0x80 or b >= 0xC0 then break end
+    n = n - 1
+  end
+  return first.key:sub(1, n)
+end
+
 -- every view places the same shape: marker, icon, label. the label is clipped to
 -- the block so a long name cannot drag the selection background past it, and
 -- paths clip from the left because the tail is the part worth reading
@@ -208,10 +244,15 @@ local function clip(label, budget, from_left)
   return vim.fn.strcharpart(label, 0, budget - 1) .. "…"
 end
 
-local function draw_entry(row, left, w, icon, label, hl, selected)
+-- `lead` is how many bytes of the label type-to-open has settled; they light up like the
+-- marker, and a clipped label keeps them off its ellipsis
+local function draw_entry(row, left, w, icon, label, hl, selected, lead)
   if selected then row:at(left, IC.marker, "SplashAccent") end
   row:at(left + 2, icon, hl)
-  row:at(left + 5, clip(label, w - 5), hl)
+  local text = clip(label, w - 5)
+  lead = math.min(lead or 0, text == label and #text or #text - #"…")
+  if lead > 0 then row:at(left + 5, text:sub(1, lead), "SplashAccent") end
+  row:at(lead > 0 and row.cells or left + 5, text:sub(lead + 1), hl)
 end
 
 local function draw_menu(row)
@@ -228,7 +269,7 @@ end
 local ARROW_UP = "\226\150\178"
 local ARROW_DOWN = "\226\150\188"
 
-local HELP_DIRS = "↵ open   e dev   c clone   d delete   esc back"
+local HELP_DIRS = "a-z/↵ open   E dev   C clone   D delete   esc back"
 
 local function draw_picker(row)
   local w = MENU_W
@@ -238,10 +279,21 @@ local function draw_picker(row)
   local list_top = title_row + 2
   local scroll = math.max(0, dir_sel - max_vis)
 
+  -- while a name is being typed, the folders it still fits keep their colour and the rest dim
+  local matches = typed ~= "" and dirs_matching(typed) or {}
+  local stem = shared_stem(matches)
+  local hit = {}
+  for _, i in ipairs(matches) do hit[i] = true end
+
   local head = "~/dev"
   local title = row(title_row):at(left + 2, head, "SplashTitle")
+  if stem ~= "" then
+    -- the title reads as the path so far, spelled the way the first match spells it
+    title:at(title.cells, "/", "SplashTitle")
+    title:at(title.cells, dir_items[matches[1]].name:sub(1, #stem), "SplashAccent")
+  end
   local msg = busy or status
-  if msg then title:at(left + 3 + vim.api.nvim_strwidth(head), msg, "SplashMsg") end
+  if msg then title:at(title.cells + 1, msg, "SplashMsg") end
 
   if scroll > 0 then
     row(list_top - 1):at(left + math.floor(w / 2), ARROW_UP, "SplashDim")
@@ -254,13 +306,15 @@ local function draw_picker(row)
     last_r = list_top + (i - 1) * MENU_ROW_STEP
     local it = dir_items[di]
     local r = row(last_r)
+    local lead = hit[di] and #stem or nil
     if di == dir_sel then
       local bg = r:at(left, "").bytes
-      draw_entry(r, left, w, it.icon, it.label, "SplashOn", true)
+      draw_entry(r, left, w, it.icon, it.label, "SplashOn", true, lead)
       r:at(left + w, "")
       r:mark(bg, "SplashSel", 1)
     else
-      draw_entry(r, left, w, it.icon, it.label, it.hl, false)
+      local hl = (typed ~= "" and not hit[di]) and "SplashDim" or it.hl
+      draw_entry(r, left, w, it.icon, it.label, hl, false, lead)
     end
   end
 
@@ -365,6 +419,7 @@ end
 local function page_move(d)
   if committed then return end
   status = nil
+  typed = "" -- a move picks by hand, so type-to-open starts over
   local count = view == "menu" and #MENU or #dir_items
   local current = view == "menu" and sel or dir_sel
   local visible = view == "menu" and #MENU or select(2, dirs_layout(math.max(1, vim.o.lines - 1), count))
@@ -380,6 +435,7 @@ end
 local function move_sel(d)
   if committed then return end
   status = nil
+  typed = ""
   if view == "menu" then
     sel = ((sel - 1 + d) % #MENU) + 1
   else
@@ -425,6 +481,34 @@ local function activate()
     view = "dirs"
     dir_sel = (#dev_dirs > 0) and 2 or 1
   end
+end
+
+-- Type-to-open: a key that leaves one folder opens it, and one that leaves several selects the
+-- first and waits. Letters every match shares never need typing, so a key that does not continue
+-- the name is tried again as the first letter after the shared part: beside crate, `c` then `b`
+-- opens crab, and typing a name out in full works as well.
+local function type_key(ch)
+  if committed or view ~= "dirs" then return end
+  status = nil
+  local stem = shared_stem(dirs_matching(typed))
+  local matches = {}
+  for _, prefix in ipairs({ typed .. ch, stem .. ch }) do
+    matches = dirs_matching(prefix)
+    if #matches > 0 then typed = prefix; break end
+  end
+  if #matches == 0 then status = "no match"; return end
+  dir_sel = matches[1]
+  if #matches == 1 then activate() end
+end
+
+-- one whole character back, which can widen the choice again
+local function untype()
+  if committed or view ~= "dirs" or typed == "" then return end
+  status = nil
+  local n = #typed
+  while n > 1 and typed:byte(n) >= 0x80 and typed:byte(n) < 0xC0 do n = n - 1 end
+  typed = typed:sub(1, n - 1)
+  dir_sel = dirs_matching(typed)[1] or dir_sel
 end
 
 local function go_back()
@@ -620,22 +704,29 @@ function M.show(on_done)
     end, { buffer = buf, nowait = true, silent = true })
   end
   kmap("<CR>", activate)
-  kmap("j", function() move_sel(1) end)
   kmap("<Down>", function() move_sel(1) end)
-  kmap("k", function() move_sel(-1) end)
   kmap("<Up>", function() move_sel(-1) end)
   kmap("<PageUp>", function() page_move(-1) end)
   kmap("<PageDown>", function() page_move(1) end)
   kmap("<Esc>", go_back)
-  kmap("q", function()
-    if view ~= "menu" then view = "menu" else shortcut("q") end
-  end)
-  kmap("l", function() shortcut("l") end)
-  kmap("r", function() shortcut("r") end)
-  kmap("n", function() shortcut("n") end)
-  kmap("c", clone_repo)
-  kmap("d", delete_dir)
-  kmap("e", open_dev)
+  kmap("<BS>", untype)
+  -- in the picker every one of these types toward a folder's name; on the menu j and k still
+  -- move and the rest are the menu's own shortcuts
+  for ch in ("abcdefghijklmnopqrstuvwxyz0123456789.-_"):gmatch(".") do
+    kmap(ch, function()
+      if view ~= "menu" then
+        type_key(ch)
+      elseif ch == "j" or ch == "k" then
+        move_sel(ch == "j" and 1 or -1)
+      else
+        shortcut(ch)
+      end
+    end)
+  end
+  -- the picker's own actions take capitals, since every lowercase letter now types
+  kmap("C", clone_repo)
+  kmap("D", delete_dir)
+  kmap("E", open_dev)
   render()
   pcall(vim.api.nvim_win_set_cursor, win, { rows, 0 })
 end
